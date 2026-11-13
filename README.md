@@ -97,6 +97,11 @@ It is laid out like a hand-kept sheet, to give the importer a realistic test:
 
 To make a fresh copy with dates around today, run `npm run sample-data`.
 
+**Fake online orders (live demo).** With the program open on the **Online orders** tab, double-click **`demo-online-orders.bat`** (or run `npm run demo-online-orders`). It acts like customers ordering on the website: 3 orders arrive right away, then one about every 20 seconds, 10 in total. Each one pops up with an alert, the unread count, the **NEW** ribbon and a ticket on the prep board.
+- **Returning customers:** some of the fake online customers are also in the sample spreadsheet, so their history shows imported and online orders together.
+- **Options:** `node scripts/demo-online-orders.js --count 20 --now 5 --every 10`
+- **Stopping:** press Ctrl+C.
+
 To start over with an empty program, close the program and delete the `data` folder. **Don't do this once real orders are in it.**
 
 ## Backing up

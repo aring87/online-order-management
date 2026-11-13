@@ -6,7 +6,8 @@
   "scripts": {
     "start": "node --no-warnings --env-file-if-exists=.env src/server.js",
     "test": "node --no-warnings --test test/*.test.js",
-    "sample-data": "node scripts/make-sample-data.js"
+    "sample-data": "node scripts/make-sample-data.js",
+    "demo-online-orders": "node scripts/demo-online-orders.js"
   },
   "engines": {
     "node": ">=22.13"
