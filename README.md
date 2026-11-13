@@ -1,72 +1,69 @@
-# Butcher Shop — Online Orders
+# Butcher Shop — Orders Program
 
-A small web app for taking online butcher orders, saving them in a database, and viewing every order grouped by customer.
+A database for every customer order and item, replacing a hand-kept Excel sheet.
+**Click a customer's name to see all of their orders**: every item, weight, price, cut instructions, dates and totals.
 
-- **Order form** (`/`): customers pick cuts by weight (lb) or count, add cutting instructions per item, choose pickup or delivery and a date, and submit.
-- **Admin** (`/admin`, staff login):
-  - **Customers**: every customer, with order count, open orders, total spent and last order date. You can search by name, email or phone.
-  - **Customer detail**: contact info and the full order history. Each order shows its items, quantities, prices, cut instructions, notes, pickup/delivery details and total.
-  - **All orders**: every order, newest first, filterable by status.
-  - Change an order's status (New → Preparing → Ready → Picked up / Delivered, or Cancelled).
+- **Customers:** the customer list is on the left. Click a name to see their full order history on the right. The search box finds customers by name, phone, email **or item** (type "brisket" to see everyone who has ordered brisket).
+- **All orders:** every order, newest first, with the items listed. Search by customer, item or order number, and filter by status.
+- **New order:** enter phone or walk-in orders. Start typing a name to pick an existing customer. Prices fill in from the product list, and you can also type any item.
+- **Import from Excel:** load the existing spreadsheet (.xlsx or .csv). See below.
+- **Export to Excel:** download everything as a spreadsheet, one row per item.
+- **Status:** mark each order New, Preparing, Ready, Picked up / Delivered or Cancelled. Orders can also be deleted.
+- **Online ordering (optional):** customers can place orders themselves at `/`, and those orders show up here too.
 
-Returning customers are matched by email, so all of their orders appear together.
+## Starting the program
 
-## Phone apps
+1. Install **Node.js** (the "LTS" version) from https://nodejs.org. You only need to do this once.
+2. Double-click **`start-windows.bat`** (Windows) or **`start-mac.command`** (Mac).
+   The first start takes a minute to set up. After that, the program opens in your web browser.
+3. Log in with the password from the **`.env`** file. It starts as `changeme`; open `.env` in Notepad to change it.
 
-Both sides install on phones as apps (Progressive Web Apps), with their own home-screen icons. No app store is needed, and updates go live as soon as you deploy.
+Keep the black window open while you use the program. Closing it stops the program, but your data stays saved.
+To open the program again, double-click the start file, or go to http://localhost:3000/admin.
 
-| App | Address | For |
-|-----|---------|-----|
-| **Butcher Shop** | `https://your-site/` | Customers placing orders |
-| **Orders Admin** | `https://your-site/admin` | Staff viewing orders by customer |
+> On a Mac, the first time you open `start-mac.command`, right-click it and choose **Open**.
 
-To install:
-- **iPhone / iPad (Safari):** open the address, tap **Share**, then **Add to Home Screen**.
-- **Android (Chrome):** open the address and tap **Install app** (or ⋮ menu → **Install app**).
+## Importing the Excel spreadsheet
 
-Phone features:
-- Screens are laid out for phones: order lists and items become cards, and the order total stays on screen.
-- Customers' contact details are remembered on their phone for quick repeat orders.
-- Staff stay logged in for 30 days. The admin app refreshes every minute and when reopened, so new orders show up.
-- Staff can tap to call, text or email a customer, or open a delivery address in Maps.
+1. Click **Import from Excel** and choose the file. Old `.xls` files must be re-saved as `.xlsx` first (File → Save As → Excel Workbook).
+2. The program guesses which column is which from the headings (customer name, phone, item, weight, price…). Check the guesses, and fix any that are wrong with the drop-downs. The preview shows exactly what will be imported.
+3. Choose whether the imported orders are past orders (**Picked up / Delivered**) or still open (**New**), then click **Import**.
 
-> Phones only install apps from sites served over **HTTPS**, so host the app somewhere with HTTPS before installing. Most hosts (Render, Railway, Fly.io and others) provide it automatically. `localhost` works for testing on the same computer.
+How the spreadsheet is read:
+- **Grouping into orders:** rows with the same order number become one order. With no order number, rows for the same customer on the same date become one order.
+- **Follow-on rows:** a row that has an item but no customer (common when one order spans several lines) is added to the customer above it.
+- **Returning customers:** customers are recognised by email, then phone number (in any format, e.g. `(555) 201-4410` = `555.201.4410`), then name. Each customer appears once, with all of their orders.
+- **Re-importing:** importing the same file again won't create duplicates. If the sheet has new rows, only the new orders are added.
+- **Skipped rows:** rows with no customer or no item are listed after the import so you can check them.
 
-## Running it
+## Backing up
 
-Requires **Node.js 22.13+**. It uses Node's built-in SQLite, so there's no database server to install.
+All data is stored in one file: **`data/orders.db`**. Copy this file somewhere safe (a USB stick or cloud folder) regularly.
+**Export to Excel** also gives you a readable copy of everything.
+
+## Settings (`.env` file)
+
+| Setting          | Default            | Purpose                                     |
+|------------------|--------------------|---------------------------------------------|
+| `ADMIN_PASSWORD` | `changeme`         | Password for logging in                     |
+| `PORT`           | `3000`             | Port the program runs on                    |
+| `DB_FILE`        | `data/orders.db`   | Where the database file is kept             |
+| `SESSION_SECRET` | auto-generated     | Only needed when hosting online             |
+| `TRUST_PROXY`    | unset              | Set to `true` when hosted behind a proxy    |
+
+## Product list
+
+The product list and prices offered on the online order form and suggested in **New order** are in `SEED_PRODUCTS` in `src/db.js`. Edit them before the first start. Imported and hand-entered items don't have to be on the list.
+
+## For developers
 
 ```bash
 npm install
-ADMIN_PASSWORD=your-secret npm start
+npm test        # automated tests
+npm start       # runs at http://localhost:3000/admin
 ```
 
-- Order form: http://localhost:3000/
-- Admin: http://localhost:3000/admin. Log in with `ADMIN_PASSWORD`.
+Requires Node.js 22.13 or newer. It uses Node's built-in SQLite, so there's no database server to install.
+Database tables: `customers`, `orders` (with `source`: online / manual / import), `order_items` and `products`.
 
-| Env var          | Default            | Purpose                       |
-|------------------|--------------------|-------------------------------|
-| `ADMIN_PASSWORD` | `changeme`         | Password for the admin pages  |
-| `PORT`           | `3000`             | HTTP port                     |
-| `DB_FILE`        | `data/orders.db`   | SQLite database file location |
-| `SESSION_SECRET` | random per start   | Set a long random string so staff stay logged in across restarts |
-| `TRUST_PROXY`    | unset              | Set to `true` when hosted behind a proxy/load balancer (most hosts) |
-
-## Products
-
-The database is seeded on first start with a starter catalog (beef, pork, poultry, lamb). To change products or prices, edit `SEED_PRODUCTS` in `src/db.js` before first run, or edit the `products` table directly (prices are in cents; set `active = 0` to hide an item).
-
-Per-pound prices are shown to customers as estimates. The final price depends on the actual cut weight.
-
-## Database tables
-
-- `customers`: name, email (unique), phone
-- `products`: name, category, unit (`lb`/`each`), price
-- `orders`: customer, status, pickup/delivery, date, address, notes, total
-- `order_items`: product, quantity, price at time of order, cut instructions
-
-## Tests
-
-```bash
-npm test
-```
+The online order form (`/`) and the admin can also be installed on phones as apps (Progressive Web Apps) if the program is hosted online with HTTPS.

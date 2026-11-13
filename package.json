@@ -4,12 +4,18 @@
   "description": "Take online butcher orders, store them in a database, and view orders by customer.",
   "main": "src/server.js",
   "scripts": {
-    "start": "node --no-warnings src/server.js",
+    "start": "node --no-warnings --env-file-if-exists=.env src/server.js",
     "test": "node --no-warnings --test test/*.test.js"
   },
-  "engines": { "node": ">=22.13" },
+  "engines": {
+    "node": ">=22.13"
+  },
   "license": "MIT",
   "dependencies": {
+    "exceljs": "^4.4.0",
     "express": "^5.1.0"
+  },
+  "overrides": {
+    "uuid": "^11.1.1"
   }
 }

@@ -1,9 +1,9 @@
 'use strict';
 // Service worker: makes the app installable and lets the app shell open instantly / offline.
 // Data (/api/*) is never cached — orders and customer info always come live from the server.
-const CACHE = 'butcher-v1';
+const CACHE = 'butcher-v2';
 const SHELL = [
-  '/', '/admin', '/styles.css', '/order.js', '/app.js',
+  '/', '/admin', '/styles.css', '/order.js', '/app.js', '/admin.js',
   '/manifest.webmanifest', '/admin.webmanifest',
   '/icons/icon-192.png', '/icons/admin-icon-192.png',
 ];

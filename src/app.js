@@ -4,6 +4,8 @@ const path = require('node:path');
 const crypto = require('node:crypto');
 const express = require('express');
 const { transaction } = require('./db');
+const { findOrCreateCustomer, insertOrder, getOrderWithItems } = require('./orders');
+const { readSpreadsheet, importRows, FIELDS, ImportError } = require('./importer');
 
 const STATUSES = ['new', 'preparing', 'ready', 'picked_up', 'cancelled'];
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -106,16 +108,66 @@ function loginLimiter() {
   };
 }
 
-function getOrderWithItems(db, orderId) {
-  const order = db.prepare('SELECT * FROM orders WHERE id = ?').get(orderId);
-  if (!order) return null;
-  order.items = db.prepare('SELECT * FROM order_items WHERE order_id = ? ORDER BY id').all(orderId);
-  return order;
+// Staff-entered orders (phone / walk-in): email and phone are optional, items can be anything.
+function validateManualOrder(body, db) {
+  const name = str(body.name, 120);
+  const email = str(body.email, 200).toLowerCase();
+  const phone = str(body.phone, 40);
+  if (!name) throw new ValidationError('Customer name is required.');
+  if (email && !EMAIL_RE.test(email)) throw new ValidationError('That email address doesn\'t look right.');
+  const date = (v) => {
+    const d = str(v, 20);
+    if (d && !/^\d{4}-\d{2}-\d{2}$/.test(d)) throw new ValidationError('Invalid date.');
+    return d || null;
+  };
+  const status = STATUSES.includes(body.status) ? body.status : 'new';
+  const fulfillment = body.fulfillment === 'delivery' ? 'delivery' : 'pickup';
+  if (!Array.isArray(body.items) || body.items.length === 0) throw new ValidationError('Add at least one item.');
+  if (body.items.length > 100) throw new ValidationError('Too many items.');
+
+  const byName = db.prepare('SELECT id FROM products WHERE name = ? COLLATE NOCASE');
+  const items = body.items.map((it, i) => {
+    const itemName = str(it.name, 200);
+    if (!itemName) throw new ValidationError(`Item ${i + 1} needs a name.`);
+    const quantity = Math.round(Number(it.quantity) * 100) / 100;
+    if (!Number.isFinite(quantity) || quantity <= 0 || quantity > 10000) throw new ValidationError(`Invalid quantity for ${itemName}.`);
+    const unitPriceCents = Math.round(Number(it.unit_price_cents) || 0);
+    if (unitPriceCents < 0) throw new ValidationError(`Invalid price for ${itemName}.`);
+    return {
+      productId: byName.get(itemName)?.id ?? null,
+      name: itemName,
+      unit: it.unit === 'lb' ? 'lb' : 'each',
+      quantity,
+      unitPriceCents,
+      lineTotalCents: Math.round(quantity * unitPriceCents),
+      cut: str(it.cut_instructions, 300),
+    };
+  });
+  return {
+    customer: { name, email: email || null, phone: phone || null },
+    order: {
+      status, fulfillment,
+      pickupDate: date(body.pickup_date),
+      createdAt: date(body.order_date) ? `${date(body.order_date)} 12:00:00` : null,
+      deliveryAddress: str(body.delivery_address, 300),
+      notes: str(body.notes, 1000),
+      source: 'manual',
+      items,
+    },
+  };
+}
+
+function csvCell(v) {
+  let s = v == null ? '' : String(v);
+  if (/^[=+\-@\t\r]/.test(s)) s = `'${s}`; // stop Excel treating text as a formula
+  return /[",\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
 }
 
 function createApp(db, { adminPassword, sessionSecret = crypto.randomBytes(32).toString('hex') }) {
   const app = express();
-  app.use(express.json({ limit: '100kb' }));
+  const smallJson = express.json({ limit: '100kb' });
+  // Spreadsheet imports can be large; they get their own body parsers after the login check.
+  app.use((req, res, next) => (req.path.startsWith('/api/admin/import') ? next() : smallJson(req, res, next)));
 
   const limiter = loginLimiter();
   const isAdmin = (req) => validToken(sessionSecret, readCookie(req, COOKIE));
@@ -130,26 +182,20 @@ function createApp(db, { adminPassword, sessionSecret = crypto.randomBytes(32).t
   app.post('/api/orders', (req, res) => {
     const o = validateOrder(req.body || {}, db);
     const order = transaction(db, () => {
-      // Returning customers are matched by email; their contact info is refreshed.
-      const customer = db.prepare(`
-        INSERT INTO customers (name, email, phone) VALUES (?, ?, ?)
-        ON CONFLICT(email) DO UPDATE SET name = excluded.name, phone = excluded.phone
-        RETURNING id`).get(o.name, o.email, o.phone);
-
-      const total = o.items.reduce((sum, it) => sum + it.lineTotal, 0);
-      const { id: orderId } = db.prepare(`
-        INSERT INTO orders (customer_id, fulfillment, pickup_date, delivery_address, notes, total_cents)
-        VALUES (?, ?, ?, ?, ?, ?) RETURNING id`).get(
-        customer.id, o.fulfillment, o.pickupDate || null,
-        o.fulfillment === 'delivery' ? o.deliveryAddress : null, o.notes || null, total);
-
-      const insertItem = db.prepare(`
-        INSERT INTO order_items (order_id, product_id, product_name, unit, quantity, unit_price_cents, line_total_cents, cut_instructions)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)`);
-      for (const it of o.items) {
-        insertItem.run(orderId, it.product.id, it.product.name, it.product.unit, it.quantity,
-          it.product.price_cents, it.lineTotal, it.cut || null);
-      }
+      // Returning customers are matched by email / phone; their contact info is refreshed.
+      const customer = findOrCreateCustomer(db, { name: o.name, email: o.email, phone: o.phone }, { refresh: true });
+      const orderId = insertOrder(db, {
+        customerId: customer.id,
+        fulfillment: o.fulfillment,
+        pickupDate: o.pickupDate,
+        deliveryAddress: o.deliveryAddress,
+        notes: o.notes,
+        source: 'online',
+        items: o.items.map((it) => ({
+          productId: it.product.id, name: it.product.name, unit: it.product.unit, quantity: it.quantity,
+          unitPriceCents: it.product.price_cents, lineTotalCents: it.lineTotal, cut: it.cut,
+        })),
+      });
       return getOrderWithItems(db, orderId);
     });
     res.status(201).json(order);
@@ -189,8 +235,10 @@ function createApp(db, { adminPassword, sessionSecret = crypto.randomBytes(32).t
              SUM(CASE WHEN o.status IN ('new', 'preparing', 'ready') THEN 1 ELSE 0 END) AS open_orders
       FROM customers c LEFT JOIN orders o ON o.customer_id = c.id
       WHERE c.name LIKE ? OR c.email LIKE ? OR c.phone LIKE ?
+         OR EXISTS (SELECT 1 FROM orders o2 JOIN order_items i ON i.order_id = o2.id
+                    WHERE o2.customer_id = c.id AND i.product_name LIKE ?)
       GROUP BY c.id
-      ORDER BY last_order_at DESC`).all(q, q, q));
+      ORDER BY last_order_at DESC, c.name COLLATE NOCASE`).all(q, q, q, q));
   });
 
   app.get('/api/admin/customers/:id', (req, res) => {
@@ -201,14 +249,86 @@ function createApp(db, { adminPassword, sessionSecret = crypto.randomBytes(32).t
     res.json(customer);
   });
 
+  // All orders, optionally filtered by status and a search (customer name/email/phone, item, or order number).
   app.get('/api/admin/orders', (req, res) => {
     const status = STATUSES.includes(req.query.status) ? req.query.status : null;
+    const term = str(req.query.q, 100);
+    const q = `%${term}%`;
     res.json(db.prepare(`
       SELECT o.*, c.name AS customer_name, c.email AS customer_email, c.phone AS customer_phone,
-             (SELECT COUNT(*) FROM order_items i WHERE i.order_id = o.id) AS item_count
+             (SELECT COUNT(*) FROM order_items i WHERE i.order_id = o.id) AS item_count,
+             (SELECT GROUP_CONCAT(i.product_name || ' (' || printf('%g', i.quantity) || CASE i.unit WHEN 'lb' THEN ' lb' ELSE '' END || ')', ', ')
+                FROM order_items i WHERE i.order_id = o.id) AS item_summary
       FROM orders o JOIN customers c ON c.id = o.customer_id
       WHERE (? IS NULL OR o.status = ?)
-      ORDER BY o.created_at DESC, o.id DESC`).all(status, status));
+        AND (? = '' OR c.name LIKE ? OR c.email LIKE ? OR c.phone LIKE ? OR o.order_ref LIKE ? OR CAST(o.id AS TEXT) = ?
+             OR EXISTS (SELECT 1 FROM order_items i WHERE i.order_id = o.id AND i.product_name LIKE ?))
+      ORDER BY o.created_at DESC, o.id DESC
+      LIMIT 1000`).all(status, status, term, q, q, q, q, term, q));
+  });
+
+  app.post('/api/admin/orders', (req, res) => {
+    const { customer, order } = validateManualOrder(req.body || {}, db);
+    const created = transaction(db, () => {
+      const c = findOrCreateCustomer(db, customer);
+      return getOrderWithItems(db, insertOrder(db, { ...order, customerId: c.id }));
+    });
+    res.status(201).json(created);
+  });
+
+  app.delete('/api/admin/orders/:id', (req, res) => {
+    const id = Number(req.params.id);
+    const order = db.prepare('SELECT customer_id FROM orders WHERE id = ?').get(id);
+    if (!order) return res.status(404).json({ error: 'Order not found' });
+    transaction(db, () => {
+      db.prepare('DELETE FROM orders WHERE id = ?').run(id);
+      // Remove the customer too if this was their only order.
+      db.prepare('DELETE FROM customers WHERE id = ? AND NOT EXISTS (SELECT 1 FROM orders WHERE customer_id = ?)')
+        .run(order.customer_id, order.customer_id);
+    });
+    res.json({ ok: true });
+  });
+
+  // ---------- Spreadsheet import / export ----------
+  app.get('/api/admin/import/fields', (req, res) => {
+    res.json(Object.entries(FIELDS).map(([key, f]) => ({ key, label: f.label })));
+  });
+
+  app.post('/api/admin/import/preview', express.raw({ type: () => true, limit: '25mb' }), async (req, res, next) => {
+    try {
+      if (!req.body?.length) throw new ImportError('No file received.');
+      res.json(await readSpreadsheet(req.body, str(req.query.filename, 200), str(req.query.sheet, 200)));
+    } catch (err) { next(err); }
+  });
+
+  app.post('/api/admin/import', express.json({ limit: '50mb' }), (req, res) => {
+    const { headers, rows, mapping, status } = req.body || {};
+    res.json(importRows(db, {
+      headers, rows, mapping: mapping || {},
+      status: STATUSES.includes(status) ? status : 'picked_up',
+    }));
+  });
+
+  // Everything as a spreadsheet (one row per item) — opens directly in Excel.
+  app.get('/api/admin/export.csv', (req, res) => {
+    const rows = db.prepare(`
+      SELECT o.id, o.order_ref, o.created_at, o.status, o.fulfillment, o.pickup_date, o.delivery_address, o.notes,
+             o.total_cents, o.source, c.name, c.email, c.phone,
+             i.product_name, i.quantity, i.unit, i.unit_price_cents, i.line_total_cents, i.cut_instructions
+      FROM orders o JOIN customers c ON c.id = o.customer_id LEFT JOIN order_items i ON i.order_id = o.id
+      ORDER BY c.name COLLATE NOCASE, o.created_at, o.id, i.id`).all();
+    const money = (c) => (c == null ? '' : (c / 100).toFixed(2));
+    const header = ['Order #', 'Order ref', 'Order date', 'Status', 'Customer', 'Email', 'Phone', 'Pickup/Delivery',
+      'Pickup date', 'Delivery address', 'Item', 'Quantity', 'Unit', 'Unit price', 'Line total', 'Cut instructions',
+      'Order notes', 'Order total', 'Source'];
+    const lines = [header, ...rows.map((r) => [r.id, r.order_ref, r.created_at.slice(0, 10), r.status, r.name, r.email,
+      r.phone, r.fulfillment, r.pickup_date, r.delivery_address, r.product_name, r.quantity, r.unit,
+      money(r.unit_price_cents), money(r.line_total_cents), r.cut_instructions, r.notes, money(r.total_cents), r.source])];
+    const csv = '\uFEFF' + lines.map((l) => l.map(csvCell).join(',')).join('\r\n') + '\r\n';
+    const today = new Date().toISOString().slice(0, 10);
+    res.set('Content-Type', 'text/csv; charset=utf-8')
+      .set('Content-Disposition', `attachment; filename="orders-${today}.csv"`)
+      .send(csv);
   });
 
   app.patch('/api/admin/orders/:id', (req, res) => {
@@ -230,7 +350,8 @@ function createApp(db, { adminPassword, sessionSecret = crypto.randomBytes(32).t
 
   // eslint-disable-next-line no-unused-vars
   app.use((err, req, res, next) => {
-    if (err instanceof ValidationError) return res.status(400).json({ error: err.message });
+    if (err instanceof ValidationError || err instanceof ImportError) return res.status(400).json({ error: err.message });
+    if (err.type === 'entity.too.large') return res.status(413).json({ error: 'That file is too big.' });
     if (err.type === 'entity.parse.failed') return res.status(400).json({ error: 'Invalid JSON' });
     console.error(err);
     res.status(500).json({ error: 'Something went wrong' });
