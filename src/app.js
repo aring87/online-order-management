@@ -292,6 +292,31 @@ function createApp(db, { adminPassword, sessionSecret = crypto.randomBytes(32).t
       LIMIT 1000`).all(status, status, term, q, q, q, q, term, q));
   });
 
+  // Orders with their items, for the "Organize by customer / item / pickup day" views.
+  // ?show=open|all|<status>  &from=YYYY-MM-DD&to=YYYY-MM-DD (pickup date)  &nodate=1 (only orders without a date)
+  // &source=online|manual|import  &q=search
+  app.get('/api/admin/orders/browse', (req, res) => {
+    const where = ['1 = 1'];
+    const params = [];
+    const show = str(req.query.show, 20) || 'open';
+    if (show === 'open') where.push("o.status IN ('new', 'preparing', 'ready')");
+    else if (STATUSES.includes(show)) { where.push('o.status = ?'); params.push(show); }
+    const isDate = (d) => /^\d{4}-\d{2}-\d{2}$/.test(d);
+    if (req.query.nodate === '1') where.push('o.pickup_date IS NULL');
+    if (isDate(req.query.from)) { where.push('o.pickup_date >= ?'); params.push(req.query.from); }
+    if (isDate(req.query.to)) { where.push('o.pickup_date <= ?'); params.push(req.query.to); }
+    if (['online', 'manual', 'import'].includes(req.query.source)) { where.push('o.source = ?'); params.push(req.query.source); }
+    const term = str(req.query.q, 100);
+    if (term) {
+      const q = `%${term}%`;
+      where.push(`(c.name LIKE ? OR c.email LIKE ? OR c.phone LIKE ? OR o.order_ref LIKE ? OR CAST(o.id AS TEXT) = ?
+                   OR EXISTS (SELECT 1 FROM order_items i WHERE i.order_id = o.id AND (i.product_name LIKE ? OR i.cut_instructions LIKE ?)))`);
+      params.push(q, q, q, q, term.replace(/^#/, ''), q, q);
+    }
+    res.json(listOrdersWithItems(db, where.join(' AND '), params,
+      'o.pickup_date IS NULL, o.pickup_date, o.pickup_time IS NULL, o.pickup_time, o.created_at DESC, o.id DESC', 3000));
+  });
+
   app.post('/api/admin/orders', (req, res) => {
     const { customer, order } = validateManualOrder(req.body || {}, db);
     const created = transaction(db, () => {

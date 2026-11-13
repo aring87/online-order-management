@@ -215,6 +215,7 @@ document.addEventListener('change', async (e) => {
     const b = sel.closest('.order, tr, .ticket')?.querySelector('.badge');
     if (b) b.outerHTML = badge(o.status);
     refreshCounts();
+    if (location.hash === '#orders') loadOrders().catch(() => {});
   } catch (err) { if (!(err instanceof AuthError)) alert(`Could not update: ${err.message}`); }
   finally { sel.disabled = false; }
 });
@@ -228,27 +229,200 @@ document.addEventListener('click', async (e) => {
   } catch (err) { if (!(err instanceof AuthError)) alert(`Could not delete: ${err.message}`); }
 });
 
-// ================= All orders =================
-$('#status-filter').innerHTML += Object.entries(STATUSES).map(([k, v]) => `<option value="${k}">${v}</option>`).join('');
-async function loadOrders() {
-  const params = new URLSearchParams({ status: $('#status-filter').value, q: $('#order-search').value.trim() });
-  const list = await api(`/api/admin/orders?${params}`);
-  $('#orders-empty').classList.toggle('hidden', list.length > 0);
-  $('#orders-body').innerHTML = list.map((o) => `
-    <tr>
-      <td class="primary">${num(o)}<span class="mobile-only"> · <a href="#customer/${o.customer_id}">${esc(o.customer_name)}</a></span></td>
-      <td data-label="Date">${when(o.created_at)}${o.pickup_date ? `<div class="muted">${o.fulfillment === 'delivery' ? 'Deliver' : 'Pickup'} ${day(o.pickup_date)}</div>` : ''}</td>
-      <td data-label="Customer" class="hide-mobile"><a href="#customer/${o.customer_id}"><b>${esc(o.customer_name)}</b></a><div class="muted">${esc(o.customer_phone || o.customer_email || '')}</div></td>
-      <td data-label="Items" class="items-cell">${esc(o.item_summary)}</td>
-      <td data-label="Total" class="num">${money(o.total_cents)}${o.payment_status === 'paid' ? '<div class="paid-note">💳 Paid</div>' : ''}</td>
-      <td data-label="Status">${statusSelect(o)}</td>
-    </tr>`).join('');
+// ================= Orders: organize by customer / item / pickup day / order =================
+const prefs = (() => { try { return JSON.parse(localStorage.getItem('orders-view') || '{}'); } catch { return {}; } })();
+const savePrefs = () => { try { localStorage.setItem('orders-view', JSON.stringify(prefs)); } catch { /* ignore */ } };
+prefs.group ||= 'customer';
+$('#f-show').innerHTML += Object.entries(STATUSES).map(([k, v]) => `<option value="${k}">Only: ${v}</option>`).join('');
+for (const [id, key] of [['#f-show', 'show'], ['#f-when', 'when'], ['#f-source', 'source']]) {
+  if (prefs[key] && [...$(id).options].some((o) => o.value === prefs[key])) $(id).value = prefs[key];
 }
-$('#status-filter').addEventListener('change', () => loadOrders().catch(() => {}));
+let browseOrders = [];
+
+function setGroup(g) {
+  prefs.group = g; savePrefs();
+  document.querySelectorAll('#group-by [data-group]').forEach((b) => {
+    b.classList.toggle('active', b.dataset.group === g);
+    b.setAttribute('aria-checked', b.dataset.group === g);
+  });
+}
+setGroup(prefs.group);
+$('#group-by').addEventListener('click', (e) => {
+  const b = e.target.closest('[data-group]');
+  if (b) { setGroup(b.dataset.group); renderBrowse(); }
+});
+
+function browseParams() {
+  const p = new URLSearchParams({ show: $('#f-show').value, q: $('#order-search').value.trim() });
+  if ($('#f-source').value) p.set('source', $('#f-source').value);
+  const t = todayISO();
+  const plus = (n) => new Date(Date.parse(t + 'T12:00') + n * 864e5).toISOString().slice(0, 10);
+  switch ($('#f-when').value) {
+    case 'overdue': p.set('to', plus(-1)); break;
+    case 'today': p.set('from', t); p.set('to', t); break;
+    case 'tomorrow': p.set('from', plus(1)); p.set('to', plus(1)); break;
+    case 'week': p.set('from', t); p.set('to', plus(6)); break;
+    case 'nodate': p.set('nodate', '1'); break;
+    default:
+  }
+  return p;
+}
+
+async function loadOrders() {
+  browseOrders = await api(`/api/admin/orders/browse?${browseParams()}`);
+  renderBrowse();
+}
+for (const [id, key] of [['#f-show', 'show'], ['#f-when', 'when'], ['#f-source', 'source']]) {
+  $(id).addEventListener('change', () => { prefs[key] = $(id).value; savePrefs(); loadOrders().catch(() => {}); });
+}
 let orderSearchTimer;
 $('#order-search').addEventListener('input', () => {
   clearTimeout(orderSearchTimer);
   orderSearchTimer = setTimeout(() => loadOrders().catch(() => {}), 200);
+});
+
+// Total amount of an item across orders, e.g. "48.5 lb + 2"
+function totalQty(lines) {
+  const sum = { lb: 0, each: 0 };
+  for (const l of lines) sum[l.unit === 'lb' ? 'lb' : 'each'] += l.quantity;
+  const r = (n) => Math.round(n * 100) / 100;
+  return [sum.lb ? `${r(sum.lb)} lb` : '', sum.each ? `${r(sum.each)}${sum.lb ? ' each' : ''}` : ''].filter(Boolean).join(' + ');
+}
+const statusCell = (o, print) => (print ? (STATUSES[o.status] || o.status) : statusSelect(o));
+const dueCell = (o) => { const d = due(o); return `<span class="due-txt ${d.cls}">${esc(d.text)}</span>`; };
+const custLink = (o, print) => (print ? esc(o.customer_name) : `<a href="#customer/${o.customer_id}">${esc(o.customer_name)}</a>`);
+const itemsInline = (o) => o.items.map((it) =>
+  `<span class="iline${it.packed ? ' packed' : ''}"><b>${esc(qty(it))}</b> ${esc(it.product_name)}${it.cut_instructions ? ` <span class="cut-inline">✂ ${esc(it.cut_instructions)}</span>` : ''}</span>`).join('');
+
+function groupHtml(title, sub, body, cls = '') {
+  return `<section class="group ${cls}"><header class="group-head"><div class="g-title">${title}</div><div class="g-sub">${sub}</div></header>${body}</section>`;
+}
+
+function renderByCustomer(orders, print) {
+  const groups = new Map();
+  for (const o of orders) {
+    if (!groups.has(o.customer_id)) groups.set(o.customer_id, []);
+    groups.get(o.customer_id).push(o);
+  }
+  return [...groups.values()]
+    .sort((a, b) => a[0].customer_name.localeCompare(b[0].customer_name, undefined, { sensitivity: 'base' }))
+    .map((list) => {
+      const c = list[0];
+      const total = list.reduce((s, o) => s + o.total_cents, 0);
+      return groupHtml(
+        `${custLink(c, print)}${c.customer_phone ? ` <span class="muted">${esc(c.customer_phone)}</span>` : ''}`,
+        `${list.length} order${list.length === 1 ? '' : 's'} · ${money(total)}`,
+        `<table class="stack gtable"><tbody>${list.map((o) => `<tr>
+          <td class="primary w-num">${num(o)}</td>
+          <td data-label="Items" class="items-col">${itemsInline(o)}${o.notes ? `<div class="g-note">📝 ${esc(o.notes)}</div>` : ''}</td>
+          <td data-label="Pickup" class="w-due">${dueCell(o)} ${paid(o)}</td>
+          <td data-label="Total" class="num w-money">${money(o.total_cents)}</td>
+          <td data-label="Status" class="w-status">${statusCell(o, print)}</td></tr>`).join('')}</tbody></table>`);
+    }).join('');
+}
+
+function renderByItem(orders, print) {
+  const q = $('#order-search').value.trim().toLowerCase();
+  const groups = new Map();
+  for (const o of orders) {
+    for (const it of o.items) {
+      const key = it.product_name.trim().toLowerCase();
+      if (!groups.has(key)) groups.set(key, { name: it.product_name.trim(), lines: [] });
+      groups.get(key).lines.push({ ...it, order: o });
+    }
+  }
+  let list = [...groups.values()];
+  // Searching for an item ("brisket") shows just that item, not everything else on those orders.
+  if (q && list.some((g) => g.name.toLowerCase().includes(q))) list = list.filter((g) => g.name.toLowerCase().includes(q));
+  return list
+    .sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }))
+    .map((g) => {
+      const packed = g.lines.filter((l) => l.packed).length;
+      return groupHtml(
+        `${esc(g.name)} <span class="g-total">${esc(totalQty(g.lines))}</span>`,
+        `${g.lines.length} order${g.lines.length === 1 ? '' : 's'}${packed ? ` · ${packed} packed` : ''}`,
+        `<table class="stack gtable"><tbody>${g.lines.map((l) => `<tr class="${l.packed ? 'packed' : ''}">
+          <td class="primary w-num">${print ? '<span class="pbox">☐</span>' : `<input type="checkbox" data-item="${l.id}" ${l.packed ? 'checked' : ''} aria-label="Packed">`} ${num(l.order)}</td>
+          <td data-label="Qty" class="w-qty"><b>${esc(qty(l))}</b></td>
+          <td data-label="Customer" class="w-cust">${custLink(l.order, print)}</td>
+          <td data-label="Cut" class="items-col">${l.cut_instructions ? `<span class="cut-inline">✂ ${esc(l.cut_instructions)}</span>` : '<span class="muted">—</span>'}</td>
+          <td data-label="Pickup" class="w-due">${dueCell(l.order)}</td>
+          <td data-label="Status" class="w-status">${print ? STATUSES[l.order.status] : badge(l.order.status)}</td></tr>`).join('')}</tbody></table>`);
+    }).join('');
+}
+
+function dayKey(o) {
+  if (!o.pickup_date) return { key: 'zzzz', label: 'No pickup date' };
+  const t = todayISO();
+  if (o.pickup_date < t && ['new', 'preparing', 'ready'].includes(o.status)) return { key: '0000', label: 'Overdue', cls: 'late' };
+  const d = due({ ...o, pickup_time: null });
+  const label = new Date(o.pickup_date + 'T00:00').toLocaleDateString([], { weekday: 'long', month: 'long', day: 'numeric' });
+  const prefix = o.pickup_date === t ? 'Today · ' : d.text.includes('Tomorrow') ? 'Tomorrow · ' : '';
+  return { key: o.pickup_date, label: prefix + label, cls: o.pickup_date === t ? 'today' : '' };
+}
+
+function renderByDay(orders, print) {
+  const groups = new Map();
+  for (const o of orders) {
+    const k = dayKey(o);
+    if (!groups.has(k.key)) groups.set(k.key, { ...k, list: [] });
+    groups.get(k.key).list.push(o);
+  }
+  return [...groups.values()].sort((a, b) => a.key.localeCompare(b.key)).map((g) => groupHtml(
+    `<span class="${g.cls || ''}">${esc(g.label)}</span>`,
+    `${g.list.length} order${g.list.length === 1 ? '' : 's'}`,
+    `<table class="stack gtable"><tbody>${g.list.map((o) => `<tr>
+      <td class="primary w-num">${num(o)}</td>
+      <td data-label="Time" class="w-time">${o.pickup_time ? clock(o.pickup_time) : '<span class="muted">—</span>'}${g.key === '0000' ? `<div class="muted">${new Date(o.pickup_date + 'T00:00').toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' })}</div>` : ''}</td>
+      <td data-label="Customer" class="w-cust">${custLink(o, print)}${o.customer_phone ? `<div class="muted">${esc(o.customer_phone)}</div>` : ''}</td>
+      <td data-label="Items" class="items-col">${itemsInline(o)}</td>
+      <td data-label="Total" class="num w-money">${money(o.total_cents)} ${paid(o)}</td>
+      <td data-label="Status" class="w-status">${statusCell(o, print)}</td></tr>`).join('')}</tbody></table>`, g.cls)).join('');
+}
+
+function renderByOrder(orders, print) {
+  const sorted = [...orders].sort((a, b) => b.id - a.id);
+  return `<table class="stack gtable flat">
+    <thead><tr><th>#</th><th>Customer</th><th>Items</th><th>Pickup</th><th class="num">Total</th><th>Status</th></tr></thead>
+    <tbody>${sorted.map((o) => `<tr>
+      <td class="primary w-num">${num(o)}<span class="mobile-only"> · ${custLink(o, print)}</span></td>
+      <td data-label="Customer" class="w-cust hide-mobile">${custLink(o, print)}<div class="muted">${esc(o.customer_phone || o.customer_email || '')}</div></td>
+      <td data-label="Items" class="items-col">${itemsInline(o)}</td>
+      <td data-label="Pickup" class="w-due">${dueCell(o)}</td>
+      <td data-label="Total" class="num w-money">${money(o.total_cents)} ${paid(o)}</td>
+      <td data-label="Status" class="w-status">${statusCell(o, print)}</td></tr>`).join('')}</tbody></table>`;
+}
+
+const RENDER = { customer: renderByCustomer, item: renderByItem, day: renderByDay, order: renderByOrder };
+
+function filtersText() {
+  const parts = [$('#f-show').selectedOptions[0].text, $('#f-when').selectedOptions[0].text];
+  if ($('#f-source').value) parts.push($('#f-source').selectedOptions[0].text);
+  if ($('#order-search').value.trim()) parts.push(`matching "${$('#order-search').value.trim()}"`);
+  return parts.join(' · ');
+}
+
+function renderBrowse() {
+  const list = browseOrders;
+  const total = list.reduce((s, o) => s + o.total_cents, 0);
+  const customers = new Set(list.map((o) => o.customer_id)).size;
+  $('#orders-summary').textContent = list.length
+    ? `${list.length} order${list.length === 1 ? '' : 's'} · ${customers} customer${customers === 1 ? '' : 's'} · ${money(total)} — ${filtersText()}`
+    : '';
+  $('#orders-empty').classList.toggle('hidden', list.length > 0);
+  $('#orders-out').className = `browse by-${prefs.group}`;
+  $('#orders-out').innerHTML = list.length ? RENDER[prefs.group](list, false) : '';
+}
+
+$('#print-list').addEventListener('click', () => {
+  const names = { customer: 'by customer', item: 'by item (cut list)', day: 'by pickup day', order: 'by order number' };
+  $('#print-area').innerHTML = `
+    <div class="pl">
+      <h1>Orders ${names[prefs.group]}</h1>
+      <p class="pl-meta">${esc(filtersText())} · ${browseOrders.length} orders · printed ${new Date().toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' })}</p>
+      <div class="browse by-${prefs.group}">${RENDER[prefs.group](browseOrders, true)}</div>
+    </div>`;
+  window.print();
 });
 
 // ================= New order =================
@@ -547,11 +721,13 @@ $('#board-full').addEventListener('click', () => {
 document.addEventListener('change', async (e) => {
   if (!e.target.matches('input[data-item]')) return;
   const box = e.target;
-  box.closest('li').classList.toggle('packed', box.checked);
+  box.closest('li, tr')?.classList.toggle('packed', box.checked);
   try {
     const o = await api(`/api/admin/items/${box.dataset.item}`, jsonOpts('PATCH', { packed: box.checked }));
     const i = boardOrders.findIndex((x) => x.id === o.id);
     if (i >= 0) { boardOrders[i] = o; renderBoard(); }
+    const j = browseOrders.findIndex((x) => x.id === o.id);
+    if (j >= 0) { browseOrders[j] = o; renderBrowse(); }
   } catch (err) {
     box.checked = !box.checked;
     if (!(err instanceof AuthError)) alert(`Could not save: ${err.message}`);

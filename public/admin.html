@@ -42,7 +42,7 @@
         <button data-view="board" class="active">Prep board <span class="count" id="count-open"></span></button>
         <button data-view="online">Online orders <span class="count alert" id="count-online"></span></button>
         <button data-view="customers">Customers</button>
-        <button data-view="orders">All orders</button>
+        <button data-view="orders">Orders</button>
         <button data-view="new">＋ New order</button>
         <button data-view="import">Import from Excel</button>
       </nav>
@@ -118,17 +118,40 @@
       <!-- All orders -->
       <section id="view-orders" class="card hidden">
         <div class="section-head">
-          <h2>All orders</h2>
-          <div class="filters">
-            <input id="order-search" type="search" placeholder="Search customer, item or order #" aria-label="Search orders">
-            <select id="status-filter" aria-label="Filter by status"><option value="">All statuses</option></select>
+          <h2>Orders</h2>
+          <div class="seg" id="group-by" role="radiogroup" aria-label="Organize orders by">
+            <span class="seg-label">Organize by</span>
+            <button type="button" role="radio" data-group="customer">👤 Customer</button>
+            <button type="button" role="radio" data-group="item">🥩 Item</button>
+            <button type="button" role="radio" data-group="day">📅 Pickup day</button>
+            <button type="button" role="radio" data-group="order"># Order</button>
           </div>
         </div>
-        <table class="stack">
-          <thead><tr><th>#</th><th>Date</th><th>Customer</th><th>Items</th><th class="num">Total</th><th>Status</th></tr></thead>
-          <tbody id="orders-body"></tbody>
-        </table>
-        <p id="orders-empty" class="muted hidden">No orders found.</p>
+        <div class="toolbar">
+          <input id="order-search" type="search" placeholder="Search customer, item, cut or #" aria-label="Search orders">
+          <select id="f-show" aria-label="Which orders">
+            <option value="open">Open orders (not picked up)</option>
+            <option value="all">All orders</option>
+          </select>
+          <select id="f-when" aria-label="Pickup date">
+            <option value="any">Any pickup date</option>
+            <option value="overdue">Overdue</option>
+            <option value="today">Pickup today</option>
+            <option value="tomorrow">Pickup tomorrow</option>
+            <option value="week">Next 7 days</option>
+            <option value="nodate">No pickup date</option>
+          </select>
+          <select id="f-source" aria-label="Where the order came from">
+            <option value="">Online &amp; in-store</option>
+            <option value="online">Online only</option>
+            <option value="manual">Entered by staff</option>
+            <option value="import">Imported from Excel</option>
+          </select>
+          <button type="button" class="secondary" id="print-list">🖨 Print this list</button>
+        </div>
+        <p id="orders-summary" class="muted orders-summary"></p>
+        <div id="orders-out"></div>
+        <p id="orders-empty" class="muted empty hidden">No orders match these filters.</p>
       </section>
 
       <!-- New order -->

@@ -107,3 +107,26 @@ test('admin screens get a live event when an online order comes in', () => withS
   const anon = await fetch(req.base + '/api/admin/events');
   assert.equal(anon.status, 401, 'events need login');
 }));
+
+test('browse orders with items, filtered by status, pickup date, source and search', () => withServer(async (req) => {
+  const mk = (body) => req('/api/admin/orders', { method: 'POST', body });
+  const a = (await mk({ name: 'Ann', pickup_date: '2026-12-01', items: [{ name: 'Beef Brisket', quantity: 12, unit: 'lb', cut_instructions: 'trimmed' }, { name: 'Bacon', quantity: 2, unit: 'lb' }] })).data;
+  const b = (await mk({ name: 'Bob', pickup_date: '2026-12-03', items: [{ name: 'beef brisket', quantity: 5, unit: 'lb' }] })).data;
+  const c = (await mk({ name: 'Cal', items: [{ name: 'Whole Chicken', quantity: 2 }] })).data;
+  const d = (await mk({ name: 'Dee', pickup_date: '2026-11-20', status: 'picked_up', items: [{ name: 'Beef Brisket', quantity: 3, unit: 'lb' }] })).data;
+  await req('/api/orders', { method: 'POST', body: online({ pickup_date: '2026-12-02' }), auth: false });
+
+  const ids = async (qs) => (await req(`/api/admin/orders/browse?${qs}`)).data.map((o) => o.customer_name);
+  assert.deepEqual(await ids(''), ['Ann', 'Web Customer', 'Bob', 'Cal'], 'open orders by pickup date, undated last');
+  assert.deepEqual(await ids('show=all'), ['Dee', 'Ann', 'Web Customer', 'Bob', 'Cal']);
+  assert.deepEqual(await ids('show=picked_up'), ['Dee']);
+  assert.deepEqual(await ids('from=2026-12-01&to=2026-12-02'), ['Ann', 'Web Customer']);
+  assert.deepEqual(await ids('nodate=1'), ['Cal']);
+  assert.deepEqual(await ids('source=online'), ['Web Customer']);
+  assert.deepEqual(await ids('q=brisket&show=all'), ['Dee', 'Ann', 'Bob']);
+  assert.deepEqual(await ids('q=trimmed'), ['Ann'], 'search includes cut instructions');
+  assert.deepEqual(await ids(`q=%23${b.id}`), ['Bob'], 'search by #number');
+  const { data } = await req('/api/admin/orders/browse?q=Ann');
+  assert.equal(data[0].items.length, 2);
+  assert.ok(a && c && d);
+}));

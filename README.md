@@ -11,7 +11,13 @@ Every order has an **order number** (#47). It's shown big on screen, on the prin
   - **⛶ Full screen** suits a screen or tablet in the back.
 - **Online orders:** website orders appear **instantly**, with no refresh needed. You get a pop-up, an unread count on the tab and in the browser tab title, and (after clicking **🔔 Turn on order alerts**) a chime and a desktop notification. Click **Got it** once an order has been seen. Online orders also go straight onto the prep board.
 - **Customers:** the customer list is on the left. Click a name to see their full order history. The search box finds customers by name, phone, email **or item** (type "brisket" to see everyone who has ordered brisket).
-- **All orders:** every order with its items. Search by customer, item or order number, and filter by status.
+- **Orders:** every order, organized the way he chooses with the **Organize by** switch. The program remembers his choice.
+  - **👤 Customer:** each customer with all of their orders and items underneath.
+  - **🥩 Item:** each cut with the **total needed**, then each order wanting it. For example, "Beef Brisket — 25 lb: #1 Tom 12 lb (trimmed), #3 Gary 5 lb (flat only)…". Items can be ticked off as packed. Search an item ("brisket") to see just that one.
+  - **📅 Pickup day:** Overdue, Today, Tomorrow, then each following day, sorted by pickup time.
+  - **# Order:** a plain list by order number.
+  - **Filters:** open orders or all orders (or one status), a pickup date (overdue, today, tomorrow, next 7 days), and where the order came from (online, in-store, imported).
+  - **🖨 Print this list** prints exactly what's on screen. Organized by Item, it makes a cut list for the back.
 - **New order:** enter phone or walk-in orders, with a pickup date and ready-by time. Start typing a name to pick an existing customer.
 - **Import from Excel:** load the existing spreadsheet (.xlsx or .csv). See below.
 - **Export to Excel:** download everything as a spreadsheet, one row per item.
