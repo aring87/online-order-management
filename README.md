@@ -26,15 +26,25 @@ Every order has an **order number** (#47). It's shown big on screen, on the prin
 
 ## Starting the program
 
+### Windows: install once, then use the desktop icon (recommended)
+
 1. Install **Node.js** (the "LTS" version) from https://nodejs.org. You only need to do this once.
-2. Double-click **`start-windows.bat`** (Windows) or **`start-mac.command`** (Mac).
-   The first start takes a minute to set up. After that, the program opens in your web browser.
-3. The program opens straight to the orders. There's no login screen while no password is set, and only this computer can open the program.
+2. Double-click **`install-windows.bat`** in this folder. It takes about a minute, and asks whether the program should start by itself when the computer turns on.
+3. From then on, double-click **Butcher Shop Orders** on the desktop, or find it in the Start menu.
 
-Keep the black window open while you use the program. Closing it stops the program, but your data stays saved.
-To open the program again, double-click the start file, or go to http://localhost:3000/admin.
+How it behaves:
+- **Its own window:** the program opens in a window without browser tabs or an address bar.
+- **No black window:** it runs quietly in the background.
+- **To stop it:** Start menu → **Stop Butcher Shop Orders**. Your data stays saved.
+- **After updating** (`git pull`): stop the program, then open it again.
+- **To remove the shortcuts:** double-click `uninstall-windows.bat`. Your data isn't touched.
+- **If the icon doesn't open the program:** run `start-windows.bat` to see what's wrong. The program's own messages are saved in `data\server-error.log`.
 
-> On a Mac, the first time you open `start-mac.command`, right-click it and choose **Open**.
+The program opens straight to the orders. There's no login screen while no password is set, and only this computer can open the program.
+
+### Without installing (Windows or Mac)
+
+Double-click **`start-windows.bat`** (Windows) or **`start-mac.command`** (Mac). Keep the black window open while you use the program; closing it stops the program. On a Mac, the first time, right-click `start-mac.command` and choose **Open**.
 
 ## Importing the Excel spreadsheet
 
