@@ -57,12 +57,13 @@ function insertOrder(db, o) {
   // Online orders start unread so they stand out on the Online orders tab; staff-entered/imported ones don't.
   const { id } = db.prepare(`
     INSERT INTO orders (customer_id, status, fulfillment, pickup_date, pickup_time, delivery_address, notes, total_cents,
-                        created_at, source, order_ref, import_key, seen_at)
+                        created_at, source, order_ref, import_key, seen_at, payment_status)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, COALESCE(?, datetime('now')), ?, ?, ?,
-            CASE WHEN ? = 'online' THEN NULL ELSE datetime('now') END) RETURNING id`).get(
+            CASE WHEN ? = 'online' THEN NULL ELSE datetime('now') END, ?) RETURNING id`).get(
     o.customerId, o.status || 'new', o.fulfillment || 'pickup', o.pickupDate || null, o.pickupTime || null,
     o.fulfillment === 'delivery' ? o.deliveryAddress || null : null, o.notes || null, total,
-    o.createdAt || null, o.source || 'online', o.orderRef || null, o.importKey || null, o.source || 'online');
+    o.createdAt || null, o.source || 'online', o.orderRef || null, o.importKey || null, o.source || 'online',
+    o.paymentStatus || null);
 
   const insertItem = db.prepare(`
     INSERT INTO order_items (order_id, product_id, product_name, unit, quantity, unit_price_cents, line_total_cents, cut_instructions)

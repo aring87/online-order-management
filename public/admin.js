@@ -7,6 +7,7 @@ const STATUSES = { new: 'New', preparing: 'Preparing', ready: 'Ready', picked_up
 const when = (s) => s ? new Date(s.replace(' ', 'T') + 'Z').toLocaleDateString([], { dateStyle: 'medium' }) : '—';
 const day = (s) => s ? new Date(s + 'T00:00').toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' }) : '';
 const badge = (st) => `<span class="badge ${st}">${STATUSES[st] || st}</span>`;
+const paid = (o) => (o.payment_status === 'paid' ? '<span class="badge paid" title="Paid online with Stripe">💳 Paid</span>' : '');
 const qty = (it) => it.unit === 'lb' ? `${it.quantity} lb` : `${it.quantity}`;
 const todayISO = () => { const d = new Date(); return new Date(d - d.getTimezoneOffset() * 60000).toISOString().slice(0, 10); };
 const SOURCES = { online: 'Online', manual: 'Entered by staff', import: 'Imported from Excel' };
@@ -151,7 +152,7 @@ function renderOrder(o) {
   return `
   <div class="order" id="order-${o.id}">
     <div class="order-head">
-      <div class="order-title">${num(o)}<div>${badge(o.status)}<div class="muted">${meta}</div></div></div>
+      <div class="order-title">${num(o)}<div>${badge(o.status)} ${paid(o)}<div class="muted">${meta}</div></div></div>
       <div class="order-actions">${statusSelect(o)}<button type="button" class="secondary small" data-print="${o.id}">🖨 Ticket</button><button type="button" class="link danger" data-delete="${o.id}">Delete</button></div>
     </div>
     ${o.delivery_address ? `<p class="notes"><b class="muted">Deliver to:</b> ${esc(o.delivery_address)}</p>` : ''}
@@ -239,7 +240,7 @@ async function loadOrders() {
       <td data-label="Date">${when(o.created_at)}${o.pickup_date ? `<div class="muted">${o.fulfillment === 'delivery' ? 'Deliver' : 'Pickup'} ${day(o.pickup_date)}</div>` : ''}</td>
       <td data-label="Customer" class="hide-mobile"><a href="#customer/${o.customer_id}"><b>${esc(o.customer_name)}</b></a><div class="muted">${esc(o.customer_phone || o.customer_email || '')}</div></td>
       <td data-label="Items" class="items-cell">${esc(o.item_summary)}</td>
-      <td data-label="Total" class="num">${money(o.total_cents)}</td>
+      <td data-label="Total" class="num">${money(o.total_cents)}${o.payment_status === 'paid' ? '<div class="paid-note">💳 Paid</div>' : ''}</td>
       <td data-label="Status">${statusSelect(o)}</td>
     </tr>`).join('');
 }
@@ -507,7 +508,7 @@ function ticketCard(o, { online = false } = {}) {
         <a href="#customer/${o.customer_id}" class="name">${esc(o.customer_name)}</a>
         ${o.customer_phone ? `<a class="muted" href="tel:${esc(o.customer_phone)}">${esc(o.customer_phone)}</a>` : ''}
       </div>
-      <div class="due ${d.cls}">${esc(d.text)}</div>
+      <div class="due ${d.cls}">${esc(d.text)} ${paid(o)}</div>
     </header>
     ${online ? `<div class="muted small-meta">Ordered ${new Date(o.created_at.replace(' ', 'T') + 'Z').toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' })} · ${badge(o.status)}</div>` : ''}
     <ul class="checklist">${o.items.map((it) => itemLine(it, { checkable: !online })).join('')}</ul>
@@ -580,7 +581,34 @@ document.addEventListener('click', async (e) => {
 });
 
 // ================= Online orders =================
+async function loadStripeStatus() {
+  const st = await api('/api/admin/stripe');
+  const box = $('#stripe-status');
+  if (!st.enabled) {
+    box.className = 'stripe-status off';
+    box.innerHTML = `<b>Stripe not connected.</b> Paid Stripe orders can flow in here automatically — add your Stripe key to the <code>.env</code> file (see the README, "Connecting Stripe").`;
+    return;
+  }
+  const ago = st.lastSyncAt ? `last checked ${new Date(st.lastSyncAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}` : 'checking…';
+  box.className = `stripe-status ${st.lastError ? 'err' : 'on'}`;
+  box.innerHTML = st.lastError
+    ? `<b>Stripe problem:</b> ${esc(st.lastError)} <button type="button" class="link" id="stripe-sync">Try again</button>`
+    : `<b>💳 Stripe connected</b> — paid orders appear here ${st.webhook ? 'instantly' : 'within a minute'} · ${ago}
+       <button type="button" class="link" id="stripe-sync">Check Stripe now</button>`;
+}
+document.addEventListener('click', async (e) => {
+  if (e.target.id !== 'stripe-sync') return;
+  e.target.textContent = 'Checking…';
+  e.target.disabled = true;
+  try {
+    const r = await api('/api/admin/stripe/sync', { method: 'POST' });
+    if (!r.added) e.target.textContent = 'No new orders';
+  } catch (err) { if (!(err instanceof AuthError)) console.warn(err); }
+  setTimeout(() => loadStripeStatus().catch(() => {}), 1200);
+});
+
 async function loadOnline() {
+  loadStripeStatus().catch(() => {});
   const list = await api(`/api/admin/online?show=${$('#online-show').value}`);
   $('#online-empty').classList.toggle('hidden', list.length > 0);
   $('#online-list').innerHTML = list.map((o) => ticketCard(o, { online: true })).join('');
@@ -612,6 +640,7 @@ async function printTicket(id) {
           <div class="pt-name">${esc(o.customer_name)}</div>
           ${o.customer_phone ? `<div>${esc(o.customer_phone)}</div>` : ''}
           <div class="pt-due">${esc(d.text)}</div>
+          ${o.payment_status === 'paid' ? '<div class="pt-paid">PAID ONLINE</div>' : ''}
         </div>
       </div>
       <table class="pt-items">
@@ -621,7 +650,7 @@ async function printTicket(id) {
       ${o.notes ? `<p><b>Notes:</b> ${esc(o.notes)}</p>` : ''}
       ${o.delivery_address ? `<p><b>Deliver to:</b> ${esc(o.delivery_address)}</p>` : ''}
       <div class="pt-foot">
-        <span>${o.items.length} item${o.items.length === 1 ? '' : 's'} · est. ${money(o.total_cents)}</span>
+        <span>${o.items.length} item${o.items.length === 1 ? '' : 's'} · ${o.payment_status === 'paid' ? 'paid' : 'est.'} ${money(o.total_cents)}</span>
         <span>Ordered ${when(o.created_at)}</span>
       </div>
     </div>`;

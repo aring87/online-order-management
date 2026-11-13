@@ -7,6 +7,7 @@ const express = require('express');
 const { transaction } = require('./db');
 const { findOrCreateCustomer, insertOrder, getOrderWithItems, listOrdersWithItems } = require('./orders');
 const { readSpreadsheet, importRows, FIELDS, ImportError } = require('./importer');
+const { createStripe } = require('./stripe');
 
 const STATUSES = ['new', 'preparing', 'ready', 'picked_up', 'cancelled'];
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -173,16 +174,23 @@ function csvCell(v) {
   return /[",\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
 }
 
-function createApp(db, { adminPassword, sessionSecret = crypto.randomBytes(32).toString('hex') }) {
+function createApp(db, { adminPassword, sessionSecret = crypto.randomBytes(32).toString('hex'), stripe: stripeOpts = {} }) {
   const app = express();
   const smallJson = express.json({ limit: '100kb' });
   // Spreadsheet imports can be large; they get their own body parsers after the login check.
-  app.use((req, res, next) => (req.path.startsWith('/api/admin/import') ? next() : smallJson(req, res, next)));
+  // Imports can be large, and Stripe webhooks need the exact raw body to check the signature.
+  const ownParser = (p) => p.startsWith('/api/admin/import') || p === '/api/stripe/webhook';
+  app.use((req, res, next) => (ownParser(req.path) ? next() : smallJson(req, res, next)));
 
   // Live updates: every change is pushed to open admin screens (prep board, online orders…) instantly.
   const events = new EventEmitter();
   events.setMaxListeners(0);
   const changed = (type, data = {}) => events.emit('change', { type, ...data });
+
+  // Paid Stripe orders flow in as online orders (see src/stripe.js).
+  const stripe = createStripe({ db, ...stripeOpts, onOrder: (e) => changed('online-order', e) });
+  app.locals.stripe = stripe;
+  app.post('/api/stripe/webhook', express.raw({ type: () => true, limit: '1mb' }), stripe.webhook);
 
   const limiter = loginLimiter();
   const isAdmin = (req) => validToken(sessionSecret, readCookie(req, COOKIE));
@@ -374,6 +382,18 @@ function createApp(db, { adminPassword, sessionSecret = crypto.randomBytes(32).t
     const order = getOrderWithItems(db, Number(req.params.id));
     if (!order) return res.status(404).json({ error: 'Order not found' });
     res.json(order);
+  });
+
+  // ---------- Stripe ----------
+  app.get('/api/admin/stripe', (req, res) => res.json(stripe.status));
+  app.post('/api/admin/stripe/sync', async (req, res) => {
+    if (!stripe.status.enabled) return res.status(400).json({ error: 'Stripe is not connected yet. Add STRIPE_SECRET_KEY to the .env file.' });
+    try {
+      const r = await stripe.sync();
+      res.json({ ...r, status: stripe.status });
+    } catch (err) {
+      res.status(502).json({ error: err.message, status: stripe.status });
+    }
   });
 
   // ---------- Spreadsheet import / export ----------

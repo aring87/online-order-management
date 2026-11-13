@@ -286,4 +286,4 @@ function importRows(db, { headers, rows, mapping, status = 'picked_up' }) {
   return result;
 }
 
-module.exports = { readSpreadsheet, importRows, guessMapping, parseCsv, FIELDS, ImportError };
+module.exports = { readSpreadsheet, importRows, guessMapping, parseCsv, toDate, FIELDS, ImportError };

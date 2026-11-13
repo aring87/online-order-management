@@ -39,7 +39,8 @@ CREATE TABLE IF NOT EXISTS orders (
   source              TEXT NOT NULL DEFAULT 'online',  -- online | manual | import
   order_ref           TEXT,                            -- order number from an imported spreadsheet
   import_key          TEXT UNIQUE,                     -- prevents importing the same order twice
-  seen_at             TEXT                             -- when staff first saw an online order (NULL = unread)
+  seen_at             TEXT,                            -- when staff first saw an online order (NULL = unread)
+  payment_status      TEXT                             -- 'paid' when paid online (Stripe); NULL = pay at pickup
 );
 
 CREATE TABLE IF NOT EXISTS order_items (
@@ -53,6 +54,11 @@ CREATE TABLE IF NOT EXISTS order_items (
   line_total_cents  INTEGER NOT NULL,
   cut_instructions  TEXT,
   packed            INTEGER NOT NULL DEFAULT 0       -- ticked off on the prep board
+);
+
+CREATE TABLE IF NOT EXISTS settings (
+  key   TEXT PRIMARY KEY,
+  value TEXT
 );
 
 CREATE INDEX IF NOT EXISTS idx_orders_customer ON orders(customer_id);
@@ -142,6 +148,7 @@ function openDb(file) {
   ensureColumn(db, 'orders', 'pickup_time', 'TEXT');
   ensureColumn(db, 'orders', 'seen_at', 'TEXT', 'UPDATE orders SET seen_at = created_at');  // existing orders count as seen
   ensureColumn(db, 'order_items', 'packed', 'INTEGER NOT NULL DEFAULT 0');
+  ensureColumn(db, 'orders', 'payment_status', 'TEXT');
 
   const { n } = db.prepare('SELECT COUNT(*) AS n FROM products').get();
   if (n === 0) {
@@ -163,4 +170,8 @@ function transaction(db, fn) {
   }
 }
 
-module.exports = { openDb, transaction, phoneKey, nameKey };
+const getSetting = (db, key) => db.prepare('SELECT value FROM settings WHERE key = ?').get(key)?.value ?? null;
+const setSetting = (db, key, value) => db.prepare(
+  'INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value').run(key, String(value));
+
+module.exports = { openDb, transaction, phoneKey, nameKey, getSetting, setSetting };

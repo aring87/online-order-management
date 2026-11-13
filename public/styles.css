@@ -353,3 +353,13 @@ button.small { padding: 6px 12px; font-size: .88rem; }
   .pt-q { font-weight: 800; white-space: nowrap; }
   .pt-foot { display: flex; justify-content: space-between; margin-top: 10px; font-size: 10pt; }
 }
+
+/* Stripe / payment */
+.badge.paid { background: #e2f4e6; color: #22663a; }
+.paid-note { font-size: .8rem; color: #22663a; font-weight: 600; }
+.stripe-status { border-radius: 8px; padding: 9px 12px; margin: 0 0 10px; font-size: .92rem; }
+.stripe-status.on { background: #e9f5ec; color: #22663a; }
+.stripe-status.off { background: #f4efe9; color: var(--muted); }
+.stripe-status.err { background: #fdecec; color: var(--accent-dark); }
+.stripe-status code { background: rgba(0,0,0,.06); padding: 1px 5px; border-radius: 4px; }
+@media print { .pt-paid { display: inline-block; margin-top: 6px; border: 2px solid #000; padding: 2px 10px; font-weight: 800; font-size: 13pt; letter-spacing: .1em; } }

@@ -26,7 +26,16 @@ function sessionSecret() {
 }
 
 const db = openDb(DB_FILE);
-const app = createApp(db, { adminPassword: ADMIN_PASSWORD, sessionSecret: sessionSecret() });
+const app = createApp(db, {
+  adminPassword: ADMIN_PASSWORD,
+  sessionSecret: sessionSecret(),
+  stripe: {
+    secretKey: process.env.STRIPE_SECRET_KEY || '',
+    webhookSecret: process.env.STRIPE_WEBHOOK_SECRET || '',
+    ...(process.env.STRIPE_API_BASE ? { apiBase: process.env.STRIPE_API_BASE } : {}),  // for testing only
+  },
+});
+app.locals.stripe.start();
 // Behind a hosting proxy (Render, Railway, Fly, nginx…) this makes HTTPS detection and IPs correct.
 if (process.env.TRUST_PROXY) app.set('trust proxy', process.env.TRUST_PROXY === 'true' ? true : process.env.TRUST_PROXY);
 
@@ -42,6 +51,8 @@ const server = app.listen(PORT, () => {
   console.log(`  Orders program:  ${url}/admin`);
   console.log(`  Online order form: ${url}/`);
   console.log(`  Database:        ${DB_FILE}`);
+  const st = app.locals.stripe.status;
+  console.log(`  Stripe:          ${st.enabled ? `connected — checking for paid orders every minute${st.webhook ? ' (+ instant webhook)' : ''}` : 'not connected (add STRIPE_SECRET_KEY to .env)'}`);
   console.log('');
   console.log('  Keep this window open while using the program. Close it to stop.');
   if (process.env.OPEN_BROWSER === '1') openBrowser(`${url}/admin`);

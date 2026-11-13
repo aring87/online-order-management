@@ -15,6 +15,7 @@ Every order has an **order number** (#47). It's shown big on screen, on the prin
 - **New order:** enter phone or walk-in orders, with a pickup date and ready-by time. Start typing a name to pick an existing customer.
 - **Import from Excel:** load the existing spreadsheet (.xlsx or .csv). See below.
 - **Export to Excel:** download everything as a spreadsheet, one row per item.
+- **Stripe:** paid Stripe Checkout and Payment Link orders come in by themselves as online orders, marked **💳 Paid**. See "Connecting Stripe" below.
 - **Online order page** (`/`): customers pick cuts, add cutting instructions, and choose a pickup date and time. They're shown their order number when they're done.
 
 ## Starting the program
@@ -42,6 +43,31 @@ How the spreadsheet is read:
 - **Re-importing:** importing the same file again won't create duplicates. If the sheet has new rows, only the new orders are added.
 - **Skipped rows:** rows with no customer or no item are listed after the import so you can check them.
 
+## Connecting Stripe
+
+Once connected, every **paid** Stripe order (Checkout or Payment Links) appears on the **Online orders** tab with the customer's name, email, phone, items and quantities. It's marked **💳 Paid** on screen and on the printed ticket. Orders are never added twice, and unpaid or abandoned checkouts are ignored.
+
+**Step 1: Give the program a read-only Stripe key.** This works on the shop computer as-is, and new paid orders appear within a minute.
+1. In Stripe, go to **Developers → API keys → Create restricted key**.
+2. Name it "Orders program". Set **Checkout Sessions** and **Products** to **Read**, and leave everything else as None. Create the key.
+3. Open the `.env` file and add the key on its own line: `STRIPE_SECRET_KEY=rk_live_...`. Never send this key by email or chat.
+4. Restart the program. The Online orders tab will say **Stripe connected**.
+
+The first time, it brings in paid orders from the last 2 days. To bring in more, set `STRIPE_FIRST_SYNC_DAYS=30` before the first start.
+
+**Step 2 (optional, only when the program is hosted online): instant orders.**
+1. In Stripe, go to **Developers → Webhooks → Add endpoint**.
+2. Use the URL `https://YOUR-SITE/api/stripe/webhook` and choose the events `checkout.session.completed` and `checkout.session.async_payment_succeeded`.
+3. Copy the **signing secret** into `.env` as `STRIPE_WEBHOOK_SECRET=whsec_...` and restart the program.
+
+**Getting pickup date, time and cut instructions from Stripe.** In each Payment Link (or Checkout settings), add up to 3 **custom fields**, for example "Pickup date", "Pickup time" and "Cutting instructions".
+- **Pickup date and time:** the program reads these into the order, so the prep board can sort by them.
+- **Anything else:** added to the order notes, including dates it can't read, like "Saturday morning".
+
+**Units.** Products whose name includes "per lb" (or that have the metadata `unit = lb` in Stripe) are shown in pounds. Everything else is shown as a count.
+
+Totals shown are the item totals from Stripe; tax and shipping are not included.
+
 ## Backing up
 
 All data is stored in one file: **`data/orders.db`**. Copy this file somewhere safe (a USB stick or cloud folder) regularly.
@@ -56,6 +82,8 @@ All data is stored in one file: **`data/orders.db`**. Copy this file somewhere s
 | `DB_FILE`        | `data/orders.db`   | Where the database file is kept             |
 | `SESSION_SECRET` | auto-generated     | Only needed when hosting online             |
 | `TRUST_PROXY`    | unset              | Set to `true` when hosted behind a proxy    |
+| `STRIPE_SECRET_KEY` | unset           | Restricted Stripe key: brings in paid orders |
+| `STRIPE_WEBHOOK_SECRET` | unset       | Optional: instant Stripe orders when hosted |
 
 ## Product list
 
