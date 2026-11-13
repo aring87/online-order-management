@@ -1,0 +1,15 @@
+{
+  "name": "butcher-online-orders",
+  "version": "1.0.0",
+  "description": "Take online butcher orders, store them in a database, and view orders by customer.",
+  "main": "src/server.js",
+  "scripts": {
+    "start": "node --no-warnings src/server.js",
+    "test": "node --no-warnings --test test/*.test.js"
+  },
+  "engines": { "node": ">=22.13" },
+  "license": "MIT",
+  "dependencies": {
+    "express": "^5.1.0"
+  }
+}

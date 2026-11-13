@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Order Online — Butcher Shop</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <header class="top">
+    <div class="wrap">
+      <h1>Butcher Shop — Order Online</h1>
+      <span class="muted" style="color:#fff">Fresh cuts, prepared to order</span>
+    </div>
+  </header>
+
+  <main class="wrap">
+    <div id="done" class="card hidden">
+      <div class="success">
+        <h2 style="margin-top:0">Thanks! Your order has been placed.</h2>
+        <p id="done-msg"></p>
+        <p class="muted">Items priced by the pound are estimates — your final price is based on the actual weight.</p>
+      </div>
+      <p><button id="another" class="secondary">Place another order</button></p>
+    </div>
+
+    <form id="order-form" novalidate>
+      <section class="card">
+        <h2>1. Choose your cuts</h2>
+        <p class="muted">Enter a quantity for anything you'd like. Add cutting instructions (thickness, ground, trimmed, vacuum-packed, etc.).</p>
+        <div id="products">Loading products…</div>
+      </section>
+
+      <section class="card">
+        <h2>2. Your details</h2>
+        <div class="grid">
+          <div class="field"><label for="name">Full name *</label><input id="name" name="name" autocomplete="name" required></div>
+          <div class="field"><label for="email">Email *</label><input id="email" name="email" type="email" autocomplete="email" required></div>
+          <div class="field"><label for="phone">Phone *</label><input id="phone" name="phone" type="tel" autocomplete="tel" required></div>
+        </div>
+        <div class="grid">
+          <div class="field">
+            <label for="fulfillment">Pickup or delivery</label>
+            <select id="fulfillment" name="fulfillment">
+              <option value="pickup">Pickup in store</option>
+              <option value="delivery">Delivery</option>
+            </select>
+          </div>
+          <div class="field"><label for="pickup_date" id="date-label">Pickup date</label><input id="pickup_date" name="pickup_date" type="date"></div>
+        </div>
+        <div class="field hidden" id="address-field">
+          <label for="delivery_address">Delivery address *</label>
+          <input id="delivery_address" name="delivery_address" autocomplete="street-address">
+        </div>
+        <div class="field">
+          <label for="notes">Order notes</label>
+          <textarea id="notes" name="notes" rows="3" placeholder="Anything else we should know?"></textarea>
+        </div>
+      </section>
+
+      <section class="card summary">
+        <div id="error" class="error hidden"></div>
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap">
+          <div>
+            <div class="muted"><span id="item-count">0</span> item(s) · estimated total</div>
+            <div class="total" id="total">$0.00</div>
+          </div>
+          <button type="submit" id="submit">Place order</button>
+        </div>
+      </section>
+    </form>
+  </main>
+
+  <script src="/order.js"></script>
+</body>
+</html>
