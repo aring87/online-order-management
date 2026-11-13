@@ -74,6 +74,21 @@ The first time, it brings in paid orders from the last 2 days. To bring in more,
 
 Totals shown are the item totals from Stripe; tax and shipping are not included.
 
+## Test data
+
+**`samples/sample-orders.xlsx`** is a **fake** order log for trying the program out. It has 98 orders from 25 made-up customers: past orders, this week's orders, and Thanksgiving and Christmas orders. Import it with **Import from Excel**.
+
+It is laid out like a hand-kept sheet, to give the importer a realistic test:
+- A title row above the headings.
+- Orders spread over several rows, often with the customer only on the first line.
+- The same customer's phone number written different ways.
+- The odd lowercase name, and a typed-in "2.5 lbs".
+- A Status column, and Excel dates and times.
+
+To make a fresh copy with dates around today, run `npm run sample-data`.
+
+To start over with an empty program, close the program and delete the `data` folder. **Don't do this once real orders are in it.**
+
 ## Backing up
 
 All data is stored in one file: **`data/orders.db`**. Copy this file somewhere safe (a USB stick or cloud folder) regularly.

@@ -195,3 +195,58 @@ test('uses the column heading to tell items are sold by the pound', () => withSe
   const { data: orders } = await req('/api/admin/orders');
   assert.equal(orders[0].item_summary, 'Whole Turkey (18 lb)');
 }));
+
+test('the bundled sample spreadsheet imports cleanly', () => withServer(async (req) => {
+  const file = path.join(__dirname, '..', 'samples', 'sample-orders.xlsx');
+  const { data: p } = await req('/api/admin/import/preview?filename=sample-orders.xlsx', { method: 'POST', raw: fs.readFileSync(file) });
+  for (const f of ['order_ref', 'order_date', 'customer_name', 'phone', 'email', 'product', 'quantity', 'unit', 'unit_price',
+    'line_total', 'cut_instructions', 'pickup_date', 'pickup_time', 'status', 'notes']) {
+    assert.ok(p.mapping[f] != null, `guessed column for ${f}`);
+  }
+  const { data: r } = await req('/api/admin/import', { method: 'POST', body: p });
+  assert.equal(r.skipped.length, 0, JSON.stringify(r.skipped.slice(0, 3)));
+  assert.ok(r.orders_created > 80);
+  assert.equal(r.customers_created, 25, 'same customer recognised despite different phone formats');
+  const { data: one } = await req('/api/admin/orders/browse?show=all&q=%231001');
+  assert.equal(one.length, 1, 'spreadsheet order numbers are kept');
+  assert.equal(one[0].id, 1001);
+}));
+
+test('reads Excel times, status words and keeps order numbers for follow-on rows', () => withServer(async (req) => {
+  const { toTime, toStatus } = require('../src/importer');
+  assert.equal(toTime(new Date(Date.UTC(1899, 11, 30, 15, 30))), '15:30');
+  assert.equal(toTime(0.5), '12:00');
+  assert.equal(toTime('1899-12-30T09:05:00.000Z'), '09:05');
+  assert.equal(toTime('4 pm'), '16:00');
+  assert.equal(toStatus('Picked up'), 'picked_up');
+  assert.equal(toStatus('DONE'), 'picked_up');
+  assert.equal(toStatus('Cutting'), 'preparing');
+  assert.equal(toStatus('Ready'), 'ready');
+  assert.equal(toStatus('Ordered'), 'new');
+  assert.equal(toStatus('cancelled'), 'cancelled');
+  assert.equal(toStatus(''), null);
+
+  const csv = 'Order #,Customer,Item,Qty,Status,Pickup Date\n'
+    + '77,Ann Lee,Brisket,4,Ready,2099-01-01\n'
+    + ',,Bacon,2,,\n'
+    + '78,Bo Day,Ribs,3,,2099-01-02\n'
+    + '79,Cy Fox,Ribs,3,,2000-01-02\n';
+  const { data: p } = await req('/api/admin/import/preview?filename=o.csv', { method: 'POST', raw: Buffer.from(csv) });
+  const { data: r } = await req('/api/admin/import', { method: 'POST', body: { ...p, status: 'picked_up' } });
+  assert.equal(r.orders_created, 3, 'follow-on row joined order 77');
+  const { data: all } = await req('/api/admin/orders/browse?show=all');
+  const byId = Object.fromEntries(all.map((o) => [o.id, o]));
+  assert.equal(byId[77].items.length, 2);
+  assert.equal(byId[77].status, 'ready');
+  assert.equal(byId[78].status, 'new', 'future pickup with no status → New');
+  assert.equal(byId[79].status, 'picked_up', 'past order with no status → the choice on screen');
+  const { data: o } = await req('/api/admin/orders', { method: 'POST', body: { name: 'Next', items: [{ name: 'Bacon', quantity: 1 }] } });
+  assert.equal(o.id, 80, 'new orders continue after the imported numbers');
+}));
+
+test('a properly capitalised name replaces all-lowercase typing', () => withServer(async (req) => {
+  await req('/api/admin/orders', { method: 'POST', body: { name: 'sam whitfield', phone: '555-010-0107', items: [{ name: 'Bacon', quantity: 1 }] } });
+  await req('/api/admin/orders', { method: 'POST', body: { name: 'Sam Whitfield', phone: '5550100107', items: [{ name: 'Bacon', quantity: 1 }] } });
+  const { data } = await req('/api/admin/customers');
+  assert.deepEqual(data.map((c) => [c.name, c.order_count]), [['Sam Whitfield', 2]]);
+}));

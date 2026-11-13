@@ -11,7 +11,7 @@
 const crypto = require('node:crypto');
 const { transaction, getSetting, setSetting } = require('./db');
 const { findOrCreateCustomer, insertOrder } = require('./orders');
-const { toDate } = require('./importer');
+const { toDate, parseTime } = require('./importer');
 
 const PAID = new Set(['paid', 'no_payment_required']);
 
@@ -37,17 +37,6 @@ function fieldText(f) {
     return f.dropdown?.options?.find((o) => o.value === v)?.label || v || '';
   }
   return String(f[f.type]?.value ?? '').trim();
-}
-
-function parseTime(text) {
-  const m = String(text || '').trim().toLowerCase().match(/^(\d{1,2})(?::(\d{2}))?\s*(a\.?m\.?|p\.?m\.?)?/);
-  if (!m) return null;
-  let h = Number(m[1]);
-  const min = Number(m[2] || 0);
-  if (m[3]?.startsWith('p') && h < 12) h += 12;
-  if (m[3]?.startsWith('a') && h === 12) h = 0;
-  if (!m[2] && !m[3]) return null;                      // a bare "3" is too ambiguous
-  return h < 24 && min < 60 ? `${String(h).padStart(2, '0')}:${String(min).padStart(2, '0')}` : null;
 }
 
 // Free-text dates like "Dec 1" parse to year 2001 — move them to this (or next) year.

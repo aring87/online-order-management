@@ -586,6 +586,7 @@ function renderMapping() {
 }
 
 function cellDisplay(v) {
+  if (typeof v === 'string' && /^1899-12-3\dT\d\d:\d\d/.test(v)) return clock(v.slice(11, 16));   // an Excel time
   if (typeof v === 'string' && /^\d{4}-\d{2}-\d{2}T00:00:00/.test(v)) return v.slice(0, 10);
   return v;
 }

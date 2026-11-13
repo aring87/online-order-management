@@ -39,7 +39,9 @@ function findOrCreateCustomer(db, { name, email, phone }, { refresh = false } = 
   // Fill in blanks (or refresh details for a customer ordering online themselves).
   const emailFree = email && !db.prepare('SELECT 1 FROM customers WHERE email = ? AND id != ?').get(email, c.id);
   const next = {
-    name: refresh ? name : c.name,
+    // Keep the name on file, but fix all-lowercase typing ("sam whitfield") when a properly capitalised one comes in.
+    name: refresh || (c.name === c.name.toLowerCase() && name !== name.toLowerCase() && nameKey(name) === nameKey(c.name))
+      ? name : c.name,
     email: (refresh || !c.email) && emailFree ? email : c.email,
     phone: (refresh || !c.phone) && phone ? phone : c.phone,
   };
@@ -56,11 +58,11 @@ function insertOrder(db, o) {
   const total = o.items.reduce((sum, it) => sum + it.lineTotalCents, 0);
   // Online orders start unread so they stand out on the Online orders tab; staff-entered/imported ones don't.
   const { id } = db.prepare(`
-    INSERT INTO orders (customer_id, status, fulfillment, pickup_date, pickup_time, delivery_address, notes, total_cents,
+    INSERT INTO orders (id, customer_id, status, fulfillment, pickup_date, pickup_time, delivery_address, notes, total_cents,
                         created_at, source, order_ref, import_key, seen_at, payment_status)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, COALESCE(?, datetime('now')), ?, ?, ?,
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE(?, datetime('now')), ?, ?, ?,
             CASE WHEN ? = 'online' THEN NULL ELSE datetime('now') END, ?) RETURNING id`).get(
-    o.customerId, o.status || 'new', o.fulfillment || 'pickup', o.pickupDate || null, o.pickupTime || null,
+    o.id ?? null, o.customerId, o.status || 'new', o.fulfillment || 'pickup', o.pickupDate || null, o.pickupTime || null,
     o.fulfillment === 'delivery' ? o.deliveryAddress || null : null, o.notes || null, total,
     o.createdAt || null, o.source || 'online', o.orderRef || null, o.importKey || null, o.source || 'online',
     o.paymentStatus || null);

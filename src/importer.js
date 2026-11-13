@@ -10,6 +10,8 @@ const FIELDS = {
   order_ref:        { label: 'Order number',       guess: /^(order|invoice|receipt|ticket)?\s*(#|no\.?|num(ber)?|id|ref)$|^order$/i },
   order_date:       { label: 'Order date',         guess: /^(order\s*)?date$|^(date\s*)?(ordered|placed)|^order\s*date|^created/i },
   pickup_date:      { label: 'Pickup / due date',  guess: /pick\s*-?up|due|deliver(y)?\s*date|collect/i },
+  pickup_time:      { label: 'Pickup time',        guess: /time/i },
+  status:           { label: 'Status',             guess: /^(order\s*)?status$|^state$|^stage$|^done\??$/i },
   customer_name:    { label: 'Customer name',      guess: /^(customer|client|full)?\s*name$|^customer$|^client$|name/i },
   first_name:       { label: 'First name',         guess: /^first(\s*name)?$/i },
   last_name:        { label: 'Last name',          guess: /^(last|sur)(\s*name)?$/i },
@@ -109,7 +111,7 @@ function guessMapping(headers) {
   const mapping = {};
   const used = new Set();
   // Most specific fields first so e.g. "Order Date" isn't taken as "Order number".
-  const order = ['email', 'phone', 'first_name', 'last_name', 'order_date', 'pickup_date', 'order_ref', 'unit_price',
+  const order = ['email', 'phone', 'first_name', 'last_name', 'status', 'order_date', 'pickup_time', 'pickup_date', 'order_ref', 'unit_price',
     'line_total', 'quantity', 'unit', 'cut_instructions', 'product', 'customer_name', 'notes', 'address'];
   for (const field of order) {
     const i = headers.findIndex((hd, idx) => !used.has(idx) && FIELDS[field].guess.test(hd.trim()));
@@ -155,6 +157,38 @@ function toQuantity(v) {
   if (!m) return { qty: null, unit: null };
   const unit = /lb|pound|#/.test(s) ? 'lb' : /ea|each|pc|piece|x\b|ct/.test(s) ? 'each' : null;
   return { qty: Number(m[1]), unit };
+}
+
+// "3:30 PM", "15:30", an Excel time cell (a Date on 30 Dec 1899, or a fraction of a day) → "HH:MM"
+function parseTime(text) {
+  const m = String(text || '').trim().toLowerCase().match(/^(\d{1,2})(?::(\d{2}))?\s*(a\.?m\.?|p\.?m\.?)?/);
+  if (!m) return null;
+  let h = Number(m[1]);
+  const min = Number(m[2] || 0);
+  if (m[3]?.startsWith('p') && h < 12) h += 12;
+  if (m[3]?.startsWith('a') && h === 12) h = 0;
+  if (!m[2] && !m[3]) return null;                      // a bare "3" is too ambiguous
+  return h < 24 && min < 60 ? `${String(h).padStart(2, '0')}:${String(min).padStart(2, '0')}` : null;
+}
+function toTime(v) {
+  const hhmm = (h, m) => `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+  if (v instanceof Date && !isNaN(v)) return hhmm(v.getUTCHours(), v.getUTCMinutes());
+  if (typeof v === 'number' && v >= 0 && v < 1) { const mins = Math.round(v * 1440); return hhmm(Math.floor(mins / 60) % 24, mins % 60); }
+  const iso = String(v ?? '').match(/^\d{4}-\d{2}-\d{2}T(\d{2}):(\d{2})/);   // a time cell after the trip through the browser
+  if (iso) return `${iso[1]}:${iso[2]}`;
+  return parseTime(v);
+}
+
+// "Picked up", "Done", "Ready", "Cutting"… → our statuses
+function toStatus(v) {
+  const s = String(v ?? '').trim().toLowerCase();
+  if (!s) return null;
+  if (/cancel|void|refund/.test(s)) return 'cancelled';
+  if (/pick|done|complete|deliver|collect|closed|filled|paid|^yes$|^y$|^x$|✓|✔/.test(s)) return 'picked_up';
+  if (/ready/.test(s)) return 'ready';
+  if (/prep|progress|cutting|working|started/.test(s)) return 'preparing';
+  if (/new|open|pending|order|^no$|^n$|wait/.test(s)) return 'new';
+  return null;
 }
 
 function toUnit(v) {
@@ -203,11 +237,14 @@ function importRows(db, { headers, rows, mapping, status = 'picked_up' }) {
     const email = text(row, 'email').toLowerCase();
     const phone = text(row, 'phone');
     const productName = text(row, 'product');
-    const ref = text(row, 'order_ref');
+    let ref = text(row, 'order_ref');
 
     let customer = name || email || phone ? { name, email, phone } : null;
     // A row with an item but no customer continues the order above it (common layout in hand-kept sheets).
-    if (!customer && productName && lastCustomer) customer = lastCustomer.customer;
+    if (!customer && productName && lastCustomer) {
+      customer = lastCustomer.customer;
+      ref ||= lastCustomer.ref;
+    }
     if (!customer) { skipped.push({ row: rowNum, reason: 'No customer name, email or phone' }); return; }
     if (!productName) { skipped.push({ row: rowNum, reason: 'No item' }); return; }
 
@@ -233,6 +270,8 @@ function importRows(db, { headers, rows, mapping, status = 'picked_up' }) {
       groups.set(groupKey, {
         ref, customer, date,
         pickupDate: toDate(col(row, 'pickup_date')),
+        pickupTime: toTime(col(row, 'pickup_time')),
+        status: toStatus(col(row, 'status')),
         notes: text(row, 'notes'),
         address: text(row, 'address'),
         items: [],
@@ -250,10 +289,12 @@ function importRows(db, { headers, rows, mapping, status = 'picked_up' }) {
       lineTotalCents: lineTotal,
       cut: text(row, 'cut_instructions').slice(0, 300),
     });
-    lastCustomer = { customer, date };
+    lastCustomer = { customer, date, ref };
   });
 
   const result = { orders_created: 0, items_created: 0, customers_created: 0, duplicates: 0, skipped };
+  const now = new Date();
+  const today = new Date(now - now.getTimezoneOffset() * 6e4).toISOString().slice(0, 10);
   const exists = db.prepare('SELECT 1 FROM orders WHERE import_key = ?');
 
   transaction(db, () => {
@@ -266,9 +307,16 @@ function importRows(db, { headers, rows, mapping, status = 'picked_up' }) {
 
       const c = findOrCreateCustomer(db, g.customer);
       if (c.created) result.customers_created++;
+      // Keep the spreadsheet's order number as ours when it's a plain number that isn't taken,
+      // so "order 1047" means the same thing in both places. New orders then continue from there.
+      const sheetNumber = /^\d{1,9}$/.test(g.ref) ? Number(g.ref) : null;
+      const keepNumber = sheetNumber && !db.prepare('SELECT 1 FROM orders WHERE id = ?').get(sheetNumber);
       insertOrder(db, {
+        id: keepNumber ? sheetNumber : null,
         customerId: c.id,
-        status,
+        // Status column wins; otherwise an order still to be picked up is New; otherwise the choice made on screen.
+        status: g.status || (g.pickupDate && g.pickupDate >= today ? 'new' : status),
+        pickupTime: g.pickupTime,
         fulfillment: g.address ? 'delivery' : 'pickup',
         pickupDate: g.pickupDate,
         deliveryAddress: g.address,
@@ -286,4 +334,4 @@ function importRows(db, { headers, rows, mapping, status = 'picked_up' }) {
   return result;
 }
 
-module.exports = { readSpreadsheet, importRows, guessMapping, parseCsv, toDate, FIELDS, ImportError };
+module.exports = { readSpreadsheet, importRows, guessMapping, parseCsv, toDate, toTime, toStatus, parseTime, FIELDS, ImportError };
