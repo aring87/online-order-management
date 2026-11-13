@@ -193,7 +193,9 @@ function createApp(db, { adminPassword, sessionSecret = crypto.randomBytes(32).t
   app.post('/api/stripe/webhook', express.raw({ type: () => true, limit: '1mb' }), stripe.webhook);
 
   const limiter = loginLimiter();
-  const isAdmin = (req) => validToken(sessionSecret, readCookie(req, COOKIE));
+  // No password = no login screen. (server.js then only listens on this computer.)
+  const loginRequired = Boolean(adminPassword);
+  const isAdmin = (req) => !loginRequired || validToken(sessionSecret, readCookie(req, COOKIE));
   const requireAdmin = (req, res, next) => (isAdmin(req) ? next() : res.status(401).json({ error: 'Please log in' }));
   const cookieOpts = (req) => `Path=/; HttpOnly; SameSite=Lax${req.secure ? '; Secure' : ''}`;
 
@@ -232,6 +234,7 @@ function createApp(db, { adminPassword, sessionSecret = crypto.randomBytes(32).t
 
   app.post('/api/admin/login', (req, res) => {
     const ip = req.ip;
+    if (!loginRequired) return res.json({ ok: true });
     if (limiter.blocked(ip)) return res.status(429).json({ error: 'Too many attempts. Try again in 15 minutes.' });
     if (!passwordMatches(req.body?.password, adminPassword)) {
       limiter.fail(ip);
@@ -248,7 +251,7 @@ function createApp(db, { adminPassword, sessionSecret = crypto.randomBytes(32).t
   });
 
   app.use('/api/admin', requireAdmin);
-  app.get('/api/admin/session', (req, res) => res.json({ ok: true }));
+  app.get('/api/admin/session', (req, res) => res.json({ ok: true, login: loginRequired }));
 
   app.get('/api/admin/customers', (req, res) => {
     const q = `%${str(req.query.q, 100)}%`;

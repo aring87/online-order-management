@@ -130,3 +130,16 @@ test('browse orders with items, filtered by status, pickup date, source and sear
   assert.equal(data[0].items.length, 2);
   assert.ok(a && c && d);
 }));
+
+test('with no password there is no login screen', async () => {
+  const db = openDb(':memory:');
+  const server = createApp(db, { adminPassword: null }).listen(0, '127.0.0.1');
+  await new Promise((r) => server.once('listening', r));
+  const base = `http://127.0.0.1:${server.address().port}`;
+  try {
+    const s = await (await fetch(base + '/api/admin/session')).json();
+    assert.deepEqual(s, { ok: true, login: false });
+    assert.equal((await fetch(base + '/api/admin/customers')).status, 200);
+    assert.equal((await fetch(base + '/api/admin/login', { method: 'POST' })).status, 200);
+  } finally { server.closeAllConnections(); server.close(); }
+});

@@ -928,8 +928,12 @@ function announce(evt) {
 $('#toast').addEventListener('click', () => $('#toast').classList.add('hidden'));
 
 // ================= Start =================
-fetch('/api/admin/session').then((r) => {
-  if (r.ok) { showApp(); route(); } else showLogin();
+fetch('/api/admin/session').then(async (r) => {
+  if (!r.ok) return showLogin();
+  const s = await r.json().catch(() => ({}));
+  showApp();
+  if (s.login === false) $('#logout').classList.add('hidden');   // no password set: nothing to log out of
+  route();
 }).catch(() => {
   $('#view-login').classList.remove('hidden');
   showError($('#login-error'), 'Could not reach the server. Is the program running?');

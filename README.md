@@ -29,7 +29,7 @@ Every order has an **order number** (#47). It's shown big on screen, on the prin
 1. Install **Node.js** (the "LTS" version) from https://nodejs.org. You only need to do this once.
 2. Double-click **`start-windows.bat`** (Windows) or **`start-mac.command`** (Mac).
    The first start takes a minute to set up. After that, the program opens in your web browser.
-3. Log in with the password from the **`.env`** file. It starts as `changeme`; open `.env` in Notepad to change it.
+3. The program opens straight to the orders. There's no login screen while no password is set, and only this computer can open the program.
 
 Keep the black window open while you use the program. Closing it stops the program, but your data stays saved.
 To open the program again, double-click the start file, or go to http://localhost:3000/admin.
@@ -83,7 +83,7 @@ All data is stored in one file: **`data/orders.db`**. Copy this file somewhere s
 
 | Setting          | Default            | Purpose                                     |
 |------------------|--------------------|---------------------------------------------|
-| `ADMIN_PASSWORD` | `changeme`         | Password for logging in                     |
+| `ADMIN_PASSWORD` | blank (no login)   | Set one to require a login. Needed to use the program from other devices or to host it online |
 | `PORT`           | `3000`             | Port the program runs on                    |
 | `DB_FILE`        | `data/orders.db`   | Where the database file is kept             |
 | `SESSION_SECRET` | auto-generated     | Only needed when hosting online             |

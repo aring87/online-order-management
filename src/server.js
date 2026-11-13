@@ -9,11 +9,11 @@ const { createApp } = require('./app');
 
 const PORT = Number(process.env.PORT) || 3000;
 const DB_FILE = process.env.DB_FILE || path.join(__dirname, '..', 'data', 'orders.db');
-const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || 'changeme';
-
-if (!process.env.ADMIN_PASSWORD) {
-  console.warn('WARNING: ADMIN_PASSWORD is not set — using the default "changeme". Set it in the .env file.');
-}
+// No password (or the old default "changeme") = no login screen, and for safety the program then only
+// answers on this computer. Set a real ADMIN_PASSWORD to use it from other devices or to host it online.
+const rawPassword = (process.env.ADMIN_PASSWORD || '').trim();
+const ADMIN_PASSWORD = rawPassword && rawPassword !== 'changeme' ? rawPassword : null;
+const HOST = ADMIN_PASSWORD ? (process.env.HOST || undefined) : '127.0.0.1';
 
 // Keep staff logged in across restarts: use SESSION_SECRET, or a random one saved next to the database.
 function sessionSecret() {
@@ -45,12 +45,13 @@ function openBrowser(url) {
   try { spawn(cmd, args, { stdio: 'ignore', detached: true }).on('error', () => {}).unref(); } catch { /* no browser */ }
 }
 
-const server = app.listen(PORT, () => {
+const server = app.listen(PORT, HOST, () => {
   const url = `http://localhost:${PORT}`;
   console.log('');
   console.log(`  Orders program:  ${url}/admin`);
   console.log(`  Online order form: ${url}/`);
   console.log(`  Database:        ${DB_FILE}`);
+  console.log(`  Login:           ${ADMIN_PASSWORD ? 'password required' : 'off — only this computer can open the program (set ADMIN_PASSWORD in .env to turn on)'}`);
   const st = app.locals.stripe.status;
   console.log(`  Stripe:          ${st.enabled ? `connected — checking for paid orders every minute${st.webhook ? ' (+ instant webhook)' : ''}` : 'not connected (add STRIPE_SECRET_KEY to .env)'}`);
   console.log('');
