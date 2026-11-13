@@ -3,13 +3,19 @@
 A database for every customer order and item, replacing a hand-kept Excel sheet.
 **Click a customer's name to see all of their orders**: every item, weight, price, cut instructions, dates and totals.
 
-- **Customers:** the customer list is on the left. Click a name to see their full order history on the right. The search box finds customers by name, phone, email **or item** (type "brisket" to see everyone who has ordered brisket).
-- **All orders:** every order, newest first, with the items listed. Search by customer, item or order number, and filter by status.
-- **New order:** enter phone or walk-in orders. Start typing a name to pick an existing customer. Prices fill in from the product list, and you can also type any item.
+Every order has an **order number** (#47). It's shown big on screen, on the printed ticket and on the customer's confirmation, so staff can say "do number 47" instead of reading the whole order out.
+
+- **Prep board** (home screen): every open order as a numbered ticket in **New → Preparing → Ready** columns, soonest pickup first. Overdue and due-today orders are highlighted.
+  - Helpers tick each item as it's cut and packed. Ticking the first item moves the order to Preparing.
+  - **🖨 Print** gives a ticket with a big number and a checklist to go with the meat or onto the bag.
+  - **⛶ Full screen** suits a screen or tablet in the back.
+- **Online orders:** website orders appear **instantly**, with no refresh needed. You get a pop-up, an unread count on the tab and in the browser tab title, and (after clicking **🔔 Turn on order alerts**) a chime and a desktop notification. Click **Got it** once an order has been seen. Online orders also go straight onto the prep board.
+- **Customers:** the customer list is on the left. Click a name to see their full order history. The search box finds customers by name, phone, email **or item** (type "brisket" to see everyone who has ordered brisket).
+- **All orders:** every order with its items. Search by customer, item or order number, and filter by status.
+- **New order:** enter phone or walk-in orders, with a pickup date and ready-by time. Start typing a name to pick an existing customer.
 - **Import from Excel:** load the existing spreadsheet (.xlsx or .csv). See below.
 - **Export to Excel:** download everything as a spreadsheet, one row per item.
-- **Status:** mark each order New, Preparing, Ready, Picked up / Delivered or Cancelled. Orders can also be deleted.
-- **Online ordering (optional):** customers can place orders themselves at `/`, and those orders show up here too.
+- **Online order page** (`/`): customers pick cuts, add cutting instructions, and choose a pickup date and time. They're shown their order number when they're done.
 
 ## Starting the program
 

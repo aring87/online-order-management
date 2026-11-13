@@ -245,3 +245,111 @@ table.preview td { white-space: nowrap; max-width: 220px; overflow: hidden; text
   table.entry td::before { content: attr(data-label); display: block; font-size: .8rem; color: var(--muted); }
   table.entry .i-qty, table.entry .i-price, table.entry .i-unit { width: 100%; }
 }
+
+/* ---------- Order numbers ---------- */
+.onum {
+  display: inline-flex; align-items: center; justify-content: center;
+  min-width: 2.2em; height: 2.2em; padding: 0 .45em;
+  border-radius: 8px; background: var(--text); color: #fff;
+  font-weight: 800; font-variant-numeric: tabular-nums; letter-spacing: -.01em; line-height: 1;
+}
+.onum::before { content: "#"; font-weight: 600; opacity: .55; margin-right: .08em; font-size: .8em; }
+.onum.big { font-size: 1.9rem; min-width: 2em; height: 1.75em; border-radius: 12px; }
+.order-title { display: flex; align-items: center; gap: 12px; }
+.order-title .onum { font-size: 1.15rem; }
+button.small { padding: 6px 12px; font-size: .88rem; }
+.your-number { margin: 14px 0 4px; font-weight: 600; }
+.your-number span { display: block; font-size: 3.4rem; font-weight: 800; line-height: 1.1; color: var(--text); }
+.your-number span::before { content: "#"; opacity: .4; }
+
+/* Tab badges */
+.tabs .count:empty { display: none; }
+.tabs .count { display: inline-block; min-width: 1.5em; padding: 1px 7px; margin-left: 4px; border-radius: 999px; background: rgba(0, 0, 0, .1); font-size: .8rem; }
+.tabs .count.alert { background: #e8a317; color: #2b2420; }
+.tabs button.active .count { background: rgba(255, 255, 255, .25); }
+.tabs button.active .count.alert { background: #ffd166; color: #2b2420; }
+
+/* ---------- Prep board ---------- */
+.board-bar { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 12px; }
+.board-bar p { margin: 0; }
+.board { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; align-items: start; }
+.board-col { background: #f1ebe5; border-radius: 14px; padding: 12px; min-height: 200px; }
+.board-col h2 { font-size: 1rem; margin: 2px 4px 12px; display: flex; align-items: center; gap: 8px; }
+.board-col .col-count:not(:empty) { background: #fff; border-radius: 999px; padding: 1px 9px; font-size: .85rem; }
+.board-col[data-status="new"] h2 { color: #1d4f91; }
+.board-col[data-status="preparing"] h2 { color: #8a5a00; }
+.board-col[data-status="ready"] h2 { color: #22663a; }
+.col-empty { text-align: center; padding: 20px 0; }
+
+.ticket { position: relative; background: #fff; border: 1px solid var(--border); border-left: 6px solid #9db7dc; border-radius: 12px; padding: 12px 14px; margin-bottom: 12px; box-shadow: 0 1px 2px rgba(0, 0, 0, .04); overflow: hidden; }
+.ticket.st-preparing { border-left-color: #e8a317; }
+.ticket.st-ready { border-left-color: #3f9b5c; }
+.ticket.st-picked_up, .ticket.st-cancelled { border-left-color: #bbb; opacity: .8; }
+.ticket header { display: grid; grid-template-columns: auto 1fr; grid-template-areas: "num who" "num due"; column-gap: 12px; align-items: center; }
+.ticket header .onum { grid-area: num; }
+.ticket .who { grid-area: who; min-width: 0; }
+.ticket .who .name { display: block; font-weight: 700; font-size: 1.05rem; color: var(--text); text-decoration: none; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ticket .who .name:hover { text-decoration: underline; }
+.ticket .who .muted { font-size: .85rem; text-decoration: none; }
+.ticket .due { grid-area: due; font-size: .85rem; font-weight: 600; color: var(--muted); }
+.ticket .due.today { color: #b25e00; }
+.ticket .due.late { color: var(--accent); }
+.ticket .due.late::after { content: " · overdue"; }
+.small-meta { font-size: .82rem; margin-top: 6px; }
+
+.checklist { list-style: none; margin: 10px 0 6px; padding: 0; }
+.checklist li { border-top: 1px dashed var(--border); }
+.checklist label { display: grid; grid-template-columns: auto auto 1fr; gap: 10px; align-items: baseline; padding: 7px 2px; font-weight: 400; margin: 0; cursor: pointer; }
+.checklist input[type=checkbox] { width: 20px; height: 20px; accent-color: #3f9b5c; align-self: center; cursor: pointer; }
+.checklist .q { font-weight: 800; white-space: nowrap; min-width: 3.4em; }
+.checklist .i { font-weight: 600; }
+.checklist .cut { display: block; font-weight: 500; font-size: .85rem; color: #8a5a00; background: #fff7e6; border-radius: 5px; padding: 2px 6px; margin-top: 3px; width: fit-content; }
+.checklist li.packed .q, .checklist li.packed .i { text-decoration: line-through; color: var(--muted); }
+.checklist li.packed .cut { opacity: .6; }
+.t-notes { margin: 6px 0; font-size: .9rem; background: var(--bg); border-radius: 6px; padding: 6px 8px; }
+.ticket footer { display: flex; align-items: center; gap: 8px; margin-top: 8px; flex-wrap: wrap; }
+.ticket footer .spacer { flex: 1; }
+.progress { width: 70px; height: 7px; border-radius: 99px; background: #eee; overflow: hidden; }
+.progress span { display: block; height: 100%; background: #3f9b5c; }
+.ticket.unseen { border-left-color: #e8a317; box-shadow: 0 0 0 3px #ffd16655; }
+.ribbon { position: absolute; top: 10px; right: -30px; transform: rotate(35deg); background: #e8a317; color: #2b2420; font-weight: 800; font-size: .72rem; padding: 3px 34px; letter-spacing: .08em; }
+
+.online-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(330px, 1fr)); gap: 14px; align-items: start; }
+.online-list .ticket { margin: 0; }
+.online-head { margin-bottom: 14px; }
+
+/* New-order pop-up */
+.toast { position: fixed; right: 20px; bottom: calc(20px + env(safe-area-inset-bottom)); z-index: 50; display: flex; gap: 16px; align-items: center;
+  background: #2b2420; color: #fff; padding: 14px 18px; border-radius: 12px; box-shadow: 0 10px 30px rgba(0, 0, 0, .25); max-width: calc(100vw - 40px); cursor: pointer; animation: pop .25s ease-out; }
+.toast a { color: #ffd166; font-weight: 700; }
+@keyframes pop { from { transform: translateY(16px); opacity: 0; } }
+
+#print-area { display: none; }
+
+@media (max-width: 1000px) {
+  .board { grid-template-columns: 1fr; }
+}
+
+/* Full-screen prep board on a back-room screen: bigger everything */
+:fullscreen body.admin header.top, :fullscreen .tabs, :fullscreen .board-bar p { display: none; }
+:fullscreen .ticket { font-size: 1.12rem; }
+
+/* ---------- Printed order ticket ---------- */
+@media print {
+  @page { margin: 12mm; }
+  body { background: #fff; }
+  body > *:not(#print-area) { display: none !important; }
+  #print-area { display: block !important; color: #000; font-size: 13pt; }
+  .pt { border: 2px solid #000; border-radius: 6px; padding: 14px 16px; }
+  .pt-top { display: flex; gap: 18px; align-items: center; border-bottom: 2px solid #000; padding-bottom: 10px; margin-bottom: 10px; }
+  .pt-num { font-size: 64pt; font-weight: 800; line-height: .95; text-align: center; border: 3px solid #000; border-radius: 10px; padding: 4px 14px; min-width: 1.6em; }
+  .pt-num small { display: block; font-size: 10pt; letter-spacing: .2em; }
+  .pt-name { font-size: 22pt; font-weight: 800; }
+  .pt-due { font-size: 15pt; font-weight: 700; margin-top: 4px; }
+  .pt-items { width: 100%; border-collapse: collapse; }
+  .pt-items th { text-align: left; font-size: 9pt; text-transform: uppercase; border-bottom: 1px solid #000; padding: 4px; color: #000; }
+  .pt-items td { padding: 8px 4px; border-bottom: 1px dashed #888; font-size: 14pt; vertical-align: top; }
+  .pt-box { font-size: 18pt !important; width: 1.4em; }
+  .pt-q { font-weight: 800; white-space: nowrap; }
+  .pt-foot { display: flex; justify-content: space-between; margin-top: 10px; font-size: 10pt; }
+}

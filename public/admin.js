@@ -10,6 +10,22 @@ const badge = (st) => `<span class="badge ${st}">${STATUSES[st] || st}</span>`;
 const qty = (it) => it.unit === 'lb' ? `${it.quantity} lb` : `${it.quantity}`;
 const todayISO = () => { const d = new Date(); return new Date(d - d.getTimezoneOffset() * 60000).toISOString().slice(0, 10); };
 const SOURCES = { online: 'Online', manual: 'Entered by staff', import: 'Imported from Excel' };
+const clock = (t) => { if (!t) return ''; const [h, m] = t.split(':').map(Number); return new Date(2000, 0, 1, h, m).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }); };
+// The order number everyone uses ("number 47") — shown big on tickets and the prep board.
+const num = (o, size = '') => `<span class="onum ${size}" title="Order number">${o.id}</span>`;
+// "Today 3:30 PM", "Tomorrow", "Tue, Dec 1" — with overdue / today highlighting.
+function due(o) {
+  if (!o.pickup_date) return { text: o.fulfillment === 'delivery' ? 'Delivery — no date' : 'No pickup date', cls: 'none' };
+  const today = todayISO();
+  const tmr = new Date(Date.now() + 864e5 - new Date().getTimezoneOffset() * 6e4).toISOString().slice(0, 10);
+  const label = o.pickup_date === today ? 'Today' : o.pickup_date === tmr ? 'Tomorrow'
+    : new Date(o.pickup_date + 'T00:00').toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' });
+  const verb = o.fulfillment === 'delivery' ? 'Deliver' : 'Pickup';
+  return {
+    text: `${verb} ${label}${o.pickup_time ? ` · ${clock(o.pickup_time)}` : ''}`,
+    cls: o.pickup_date < today ? 'late' : o.pickup_date === today ? 'today' : '',
+  };
+}
 
 class AuthError extends Error {}
 
@@ -25,13 +41,17 @@ const showError = (el, msg) => { el.textContent = msg || ''; el.classList.toggle
 
 // ================= Login =================
 function showLogin() {
-  for (const id of ['#app', '#refresh', '#logout', '#export']) $(id).classList.add('hidden');
+  for (const id of ['#app', '#refresh', '#logout', '#export', '#alerts']) $(id).classList.add('hidden');
+  stopLive();
   $('#view-login').classList.remove('hidden');
   $('#password').focus();
 }
 function showApp() {
   $('#view-login').classList.add('hidden');
   for (const id of ['#app', '#refresh', '#logout', '#export']) $(id).classList.remove('hidden');
+  updateAlertsButton();
+  startLive();
+  refreshCounts();
 }
 $('#login-form').addEventListener('submit', async (e) => {
   e.preventDefault();
@@ -51,24 +71,26 @@ $('#logout').addEventListener('click', async () => {
 });
 
 // ================= Views & routing =================
-const VIEWS = ['customers', 'orders', 'new', 'import'];
+const VIEWS = ['board', 'online', 'customers', 'orders', 'new', 'import'];
 function show(view) {
   for (const v of VIEWS) $(`#view-${v}`).classList.toggle('hidden', v !== view);
   document.querySelectorAll('.tabs button').forEach((b) => b.classList.toggle('active', b.dataset.view === view));
 }
 document.querySelectorAll('.tabs button').forEach((b) => b.addEventListener('click', () => {
-  location.hash = b.dataset.view === 'customers' ? '' : b.dataset.view;
+  location.hash = b.dataset.view === 'board' ? '' : b.dataset.view;
 }));
 document.addEventListener('click', (e) => {
   const go = e.target.closest('[data-goto]');
-  if (go) location.hash = go.dataset.goto === 'customers' ? '' : go.dataset.goto;
+  if (go) location.hash = go.dataset.goto === 'board' ? '' : go.dataset.goto;
 });
 
 async function route({ quiet = false } = {}) {
   const h = location.hash.slice(1);
   const m = h.match(/^customer\/(\d+)$/);
   try {
-    if (m || h === '') {
+    if (h === '') { show('board'); await loadBoard(); }
+    else if (h === 'online') { show('online'); await loadOnline(); }
+    else if (m || h === 'customers') {
       show('customers');
       await loadCustomers();
       if (m) await loadCustomer(m[1], { quiet }); else clearCustomer();
@@ -122,15 +144,15 @@ function statusSelect(order) {
 function renderOrder(o) {
   const meta = [
     `Ordered ${when(o.created_at)}`,
-    o.pickup_date ? `${o.fulfillment === 'delivery' ? 'Delivery' : 'Pickup'} ${day(o.pickup_date)}` : (o.fulfillment === 'delivery' ? 'Delivery' : ''),
+    o.pickup_date ? `${o.fulfillment === 'delivery' ? 'Delivery' : 'Pickup'} ${day(o.pickup_date)}${o.pickup_time ? ` ${clock(o.pickup_time)}` : ''}` : (o.fulfillment === 'delivery' ? 'Delivery' : ''),
     SOURCES[o.source] || '',
     o.order_ref ? `Ref ${esc(o.order_ref)}` : '',
   ].filter(Boolean).join(' · ');
   return `
   <div class="order" id="order-${o.id}">
     <div class="order-head">
-      <div><span class="title">Order #${o.id}</span> ${badge(o.status)}<div class="muted">${meta}</div></div>
-      <div class="order-actions">${statusSelect(o)}<button type="button" class="link danger" data-delete="${o.id}">Delete</button></div>
+      <div class="order-title">${num(o)}<div>${badge(o.status)}<div class="muted">${meta}</div></div></div>
+      <div class="order-actions">${statusSelect(o)}<button type="button" class="secondary small" data-print="${o.id}">🖨 Ticket</button><button type="button" class="link danger" data-delete="${o.id}">Delete</button></div>
     </div>
     ${o.delivery_address ? `<p class="notes"><b class="muted">Deliver to:</b> ${esc(o.delivery_address)}</p>` : ''}
     ${o.notes ? `<p class="notes"><b class="muted">Notes:</b> ${esc(o.notes)}</p>` : ''}
@@ -179,7 +201,7 @@ async function loadCustomer(id, { quiet = false } = {}) {
   $('#customer-orders').innerHTML = c.orders.length ? c.orders.map(renderOrder).join('') : '<p class="muted">No orders.</p>';
 }
 
-$('#back').addEventListener('click', () => { location.hash = ''; });
+$('#back').addEventListener('click', () => { location.hash = 'customers'; });
 $('#add-for-customer').addEventListener('click', () => { location.hash = `new?customer=${selectedId}`; });
 
 // Status changes and deletes (customer page and all-orders list)
@@ -189,8 +211,9 @@ document.addEventListener('change', async (e) => {
   sel.disabled = true;
   try {
     const o = await api(`/api/admin/orders/${sel.dataset.order}`, jsonOpts('PATCH', { status: sel.value }));
-    const b = sel.closest('.order, tr')?.querySelector('.badge');
+    const b = sel.closest('.order, tr, .ticket')?.querySelector('.badge');
     if (b) b.outerHTML = badge(o.status);
+    refreshCounts();
   } catch (err) { if (!(err instanceof AuthError)) alert(`Could not update: ${err.message}`); }
   finally { sel.disabled = false; }
 });
@@ -212,7 +235,7 @@ async function loadOrders() {
   $('#orders-empty').classList.toggle('hidden', list.length > 0);
   $('#orders-body').innerHTML = list.map((o) => `
     <tr>
-      <td class="primary"><b>#${o.id}</b><span class="mobile-only"> · <a href="#customer/${o.customer_id}">${esc(o.customer_name)}</a></span></td>
+      <td class="primary">${num(o)}<span class="mobile-only"> · <a href="#customer/${o.customer_id}">${esc(o.customer_name)}</a></span></td>
       <td data-label="Date">${when(o.created_at)}${o.pickup_date ? `<div class="muted">${o.fulfillment === 'delivery' ? 'Deliver' : 'Pickup'} ${day(o.pickup_date)}</div>` : ''}</td>
       <td data-label="Customer" class="hide-mobile"><a href="#customer/${o.customer_id}"><b>${esc(o.customer_name)}</b></a><div class="muted">${esc(o.customer_phone || o.customer_email || '')}</div></td>
       <td data-label="Items" class="items-cell">${esc(o.item_summary)}</td>
@@ -331,7 +354,7 @@ $('#new-form').addEventListener('submit', async (e) => {
   try {
     const o = await api('/api/admin/orders', jsonOpts('POST', {
       name: $('#n-name').value, phone: $('#n-phone').value, email: $('#n-email').value,
-      order_date: $('#n-date').value, pickup_date: $('#n-pickup').value, status: $('#n-status').value,
+      order_date: $('#n-date').value, pickup_date: $('#n-pickup').value, pickup_time: $('#n-time').value, status: $('#n-status').value,
       fulfillment: $('#n-fulfillment').value, delivery_address: $('#n-address').value, notes: $('#n-notes').value,
       items,
     }));
@@ -452,13 +475,254 @@ $('#import-go').addEventListener('click', async () => {
   }
 });
 
-// ================= Start =================
-setInterval(() => {
-  const busy = document.activeElement?.matches('input, select, textarea');
-  const h = location.hash.slice(1);
-  if (!$('#app').classList.contains('hidden') && !document.hidden && !busy && !h.startsWith('new') && h !== 'import') route({ quiet: true });
-}, 60000);
+// ================= Prep board =================
+const NEXT = {
+  new: { status: 'preparing', label: 'Start ▶' },
+  preparing: { status: 'ready', label: 'Ready ✓' },
+  ready: { status: 'picked_up', label: 'Picked up ✓' },
+};
+let boardOrders = [];
 
+function itemLine(it, { checkable = false } = {}) {
+  const box = checkable
+    ? `<input type="checkbox" data-item="${it.id}" ${it.packed ? 'checked' : ''} aria-label="Packed: ${esc(it.product_name)}">`
+    : '';
+  return `<li class="${it.packed ? 'packed' : ''}"><label>${box}
+    <span class="q">${esc(qty(it))}</span>
+    <span class="i">${esc(it.product_name)}${it.cut_instructions ? `<span class="cut">✂ ${esc(it.cut_instructions)}</span>` : ''}</span>
+  </label></li>`;
+}
+
+function ticketCard(o, { online = false } = {}) {
+  const d = due(o);
+  const packed = o.items.filter((i) => i.packed).length;
+  const next = NEXT[o.status];
+  const unseen = online && !o.seen_at;
+  return `
+  <article class="ticket st-${o.status} ${unseen ? 'unseen' : ''}" id="ticket-${o.id}">
+    ${unseen ? '<div class="ribbon">NEW</div>' : ''}
+    <header>
+      ${num(o, 'big')}
+      <div class="who">
+        <a href="#customer/${o.customer_id}" class="name">${esc(o.customer_name)}</a>
+        ${o.customer_phone ? `<a class="muted" href="tel:${esc(o.customer_phone)}">${esc(o.customer_phone)}</a>` : ''}
+      </div>
+      <div class="due ${d.cls}">${esc(d.text)}</div>
+    </header>
+    ${online ? `<div class="muted small-meta">Ordered ${new Date(o.created_at.replace(' ', 'T') + 'Z').toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' })} · ${badge(o.status)}</div>` : ''}
+    <ul class="checklist">${o.items.map((it) => itemLine(it, { checkable: !online })).join('')}</ul>
+    ${o.notes ? `<p class="t-notes">📝 ${esc(o.notes)}</p>` : ''}
+    ${o.delivery_address ? `<p class="t-notes">🚚 ${esc(o.delivery_address)}</p>` : ''}
+    <footer>
+      ${online
+        ? `<span class="muted">${o.items.length} item${o.items.length === 1 ? '' : 's'} · ${money(o.total_cents)}</span>`
+        : `<span class="progress" title="Items packed"><span style="width:${o.items.length ? (packed / o.items.length) * 100 : 0}%"></span></span><span class="muted">${packed}/${o.items.length} packed</span>`}
+      <span class="spacer"></span>
+      <button type="button" class="secondary small" data-print="${o.id}" title="Print ticket">🖨</button>
+      ${unseen ? `<button type="button" class="small" data-seen="${o.id}">Got it</button>` : ''}
+      ${!online && next ? `<button type="button" class="small" data-advance="${o.id}" data-to="${next.status}">${next.label}</button>` : ''}
+    </footer>
+  </article>`;
+}
+
+async function loadBoard() {
+  boardOrders = await api('/api/admin/board');
+  renderBoard();
+}
+function renderBoard() {
+  const q = $('#board-search').value.trim().toLowerCase();
+  const shown = boardOrders.filter((o) => !q || String(o.id) === q.replace('#', '') || o.customer_name.toLowerCase().includes(q));
+  for (const col of document.querySelectorAll('.board-col')) {
+    const list = shown.filter((o) => o.status === col.dataset.status);
+    col.querySelector('.col-count').textContent = list.length || '';
+    col.querySelector('.col-body').innerHTML = list.length ? list.map((o) => ticketCard(o)).join('') : '<p class="muted col-empty">Nothing here</p>';
+  }
+}
+$('#board-search').addEventListener('input', renderBoard);
+$('#board-full').addEventListener('click', () => {
+  if (document.fullscreenElement) document.exitFullscreen(); else document.documentElement.requestFullscreen?.();
+});
+
+document.addEventListener('change', async (e) => {
+  if (!e.target.matches('input[data-item]')) return;
+  const box = e.target;
+  box.closest('li').classList.toggle('packed', box.checked);
+  try {
+    const o = await api(`/api/admin/items/${box.dataset.item}`, jsonOpts('PATCH', { packed: box.checked }));
+    const i = boardOrders.findIndex((x) => x.id === o.id);
+    if (i >= 0) { boardOrders[i] = o; renderBoard(); }
+  } catch (err) {
+    box.checked = !box.checked;
+    if (!(err instanceof AuthError)) alert(`Could not save: ${err.message}`);
+  }
+});
+
+document.addEventListener('click', async (e) => {
+  const adv = e.target.closest('[data-advance]');
+  if (adv) {
+    const o = boardOrders.find((x) => String(x.id) === adv.dataset.advance);
+    const unpacked = o ? o.items.filter((i) => !i.packed).length : 0;
+    if (adv.dataset.to === 'ready' && unpacked && !confirm(`${unpacked} item(s) on order ${adv.dataset.advance} aren't ticked yet. Mark it ready anyway?`)) return;
+    adv.disabled = true;
+    try {
+      await api(`/api/admin/orders/${adv.dataset.advance}`, jsonOpts('PATCH', { status: adv.dataset.to }));
+      await loadBoard();
+      refreshCounts();
+    } catch (err) { if (!(err instanceof AuthError)) alert(err.message); adv.disabled = false; }
+  }
+  const seen = e.target.closest('[data-seen]');
+  if (seen) {
+    await api(`/api/admin/orders/${seen.dataset.seen}/seen`, { method: 'POST' }).catch(() => {});
+    refreshCounts(); loadOnline().catch(() => {});
+  }
+  const pr = e.target.closest('[data-print]');
+  if (pr) printTicket(pr.dataset.print);
+});
+
+// ================= Online orders =================
+async function loadOnline() {
+  const list = await api(`/api/admin/online?show=${$('#online-show').value}`);
+  $('#online-empty').classList.toggle('hidden', list.length > 0);
+  $('#online-list').innerHTML = list.map((o) => ticketCard(o, { online: true })).join('');
+}
+$('#online-show').addEventListener('change', () => loadOnline().catch(() => {}));
+$('#online-seen-all').addEventListener('click', async () => {
+  await api('/api/admin/online/seen-all', { method: 'POST' }).catch(() => {});
+  refreshCounts(); loadOnline().catch(() => {});
+});
+const orderPage = `${location.origin}/`;
+$('#order-link').href = orderPage;
+$('#order-link').textContent = orderPage;
+$('#copy-link').addEventListener('click', async () => {
+  try { await navigator.clipboard.writeText(orderPage); $('#copy-link').textContent = 'Copied ✓'; }
+  catch { prompt('Copy this link:', orderPage); }
+  setTimeout(() => { $('#copy-link').textContent = 'Copy link'; }, 2000);
+});
+
+// ================= Printing tickets =================
+async function printTicket(id) {
+  let o;
+  try { o = await api(`/api/admin/orders/${id}`); } catch (err) { if (!(err instanceof AuthError)) alert(err.message); return; }
+  const d = due(o);
+  $('#print-area').innerHTML = `
+    <div class="pt">
+      <div class="pt-top">
+        <div class="pt-num"><small>ORDER</small>${o.id}</div>
+        <div class="pt-who">
+          <div class="pt-name">${esc(o.customer_name)}</div>
+          ${o.customer_phone ? `<div>${esc(o.customer_phone)}</div>` : ''}
+          <div class="pt-due">${esc(d.text)}</div>
+        </div>
+      </div>
+      <table class="pt-items">
+        <thead><tr><th></th><th>Qty</th><th>Item</th><th>Cut / instructions</th></tr></thead>
+        <tbody>${o.items.map((it) => `<tr><td class="pt-box">☐</td><td class="pt-q">${esc(qty(it))}</td><td>${esc(it.product_name)}</td><td>${esc(it.cut_instructions || '')}</td></tr>`).join('')}</tbody>
+      </table>
+      ${o.notes ? `<p><b>Notes:</b> ${esc(o.notes)}</p>` : ''}
+      ${o.delivery_address ? `<p><b>Deliver to:</b> ${esc(o.delivery_address)}</p>` : ''}
+      <div class="pt-foot">
+        <span>${o.items.length} item${o.items.length === 1 ? '' : 's'} · est. ${money(o.total_cents)}</span>
+        <span>Ordered ${when(o.created_at)}</span>
+      </div>
+    </div>`;
+  window.print();
+}
+
+// ================= Live updates & alerts =================
+let live = null;
+let fallbackTimer = null;
+
+async function refreshCounts() {
+  try {
+    const c = await api('/api/admin/counts');
+    $('#count-online').textContent = c.unseen_online || '';
+    $('#count-open').textContent = c.open_orders || '';
+    document.title = `${c.unseen_online ? `(${c.unseen_online}) ` : ''}Orders — Butcher Shop`;
+  } catch { /* offline / logged out */ }
+}
+
+function refreshVisible() {
+  const busy = document.activeElement?.matches('input:not([type=checkbox]):not([type=search]), select, textarea');
+  const h = location.hash.slice(1);
+  if (busy || h.startsWith('new') || h === 'import') return;
+  route({ quiet: true });
+}
+
+function startLive() {
+  if (live || !window.EventSource) return;
+  live = new EventSource('/api/admin/events');
+  let timer;
+  live.addEventListener('change', (e) => {
+    const evt = JSON.parse(e.data || '{}');
+    if (evt.type === 'online-order') announce(evt);
+    refreshCounts();
+    clearTimeout(timer);
+    timer = setTimeout(refreshVisible, 250);   // several quick changes → one refresh
+  });
+  // Safety net in case the live connection drops unnoticed.
+  fallbackTimer = setInterval(() => { refreshCounts(); if (!document.hidden) refreshVisible(); }, 120000);
+}
+function stopLive() {
+  live?.close(); live = null;
+  clearInterval(fallbackTimer);
+}
+
+// Sound + notification for new online orders. Browsers only allow sound after a click, hence the button.
+let audioCtx = null;
+const alertsOn = () => { try { return localStorage.getItem('order-alerts') === 'on'; } catch { return false; } };
+function updateAlertsButton() {
+  const on = alertsOn() && audioCtx;
+  $('#alerts').classList.toggle('hidden', !!on);
+  $('#alerts').textContent = alertsOn() ? '🔔 Click to re-enable sound' : '🔔 Turn on order alerts';
+}
+$('#alerts').addEventListener('click', async () => {
+  audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)();
+  await audioCtx.resume().catch(() => {});
+  if (window.Notification && Notification.permission === 'default') await Notification.requestPermission().catch(() => {});
+  try { localStorage.setItem('order-alerts', 'on'); } catch { /* ignore */ }
+  chime();
+  updateAlertsButton();
+});
+// After the first click anywhere, sound can play again on this page load.
+document.addEventListener('click', () => {
+  if (alertsOn() && !audioCtx) {
+    audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    updateAlertsButton();
+  }
+}, { once: false, capture: true });
+
+function chime() {
+  if (!audioCtx) return;
+  const t = audioCtx.currentTime;
+  [[880, 0], [1320, 0.18], [1760, 0.36]].forEach(([f, at]) => {
+    const o = audioCtx.createOscillator();
+    const g = audioCtx.createGain();
+    o.type = 'sine'; o.frequency.value = f;
+    g.gain.setValueAtTime(0.0001, t + at);
+    g.gain.exponentialRampToValueAtTime(0.3, t + at + 0.02);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + at + 0.35);
+    o.connect(g).connect(audioCtx.destination);
+    o.start(t + at); o.stop(t + at + 0.4);
+  });
+}
+
+let toastTimer;
+function announce(evt) {
+  if (alertsOn()) chime();
+  const text = `New online order #${evt.id} from ${evt.name} · ${money(evt.total_cents)}`;
+  const t = $('#toast');
+  t.innerHTML = `<b>🛒 ${esc(text)}</b><a href="#online">View</a>`;
+  t.classList.remove('hidden');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => t.classList.add('hidden'), 15000);
+  if (alertsOn() && window.Notification && Notification.permission === 'granted' && document.hidden) {
+    const n = new Notification('New online order', { body: text, icon: '/icons/admin-icon-192.png', tag: `order-${evt.id}` });
+    n.onclick = () => { window.focus(); location.hash = 'online'; n.close(); };
+  }
+}
+$('#toast').addEventListener('click', () => $('#toast').classList.add('hidden'));
+
+// ================= Start =================
 fetch('/api/admin/session').then((r) => {
   if (r.ok) { showApp(); route(); } else showLogin();
 }).catch(() => {

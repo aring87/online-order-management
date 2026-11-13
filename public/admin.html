@@ -15,6 +15,7 @@
     <div class="wrap wide">
       <h1>Butcher Shop · Orders</h1>
       <div class="header-actions">
+        <button id="alerts" class="install hidden" type="button" title="Play a sound and show a notification when an online order arrives">🔔 Turn on order alerts</button>
         <a id="export" class="btn install hidden" href="/api/admin/export.csv" download>⬇ Export to Excel</a>
         <button id="refresh" class="install hidden" type="button">↻ Refresh</button>
         <button id="logout" class="install hidden" type="button">Log out</button>
@@ -38,14 +39,53 @@
 
     <div id="app" class="hidden">
       <nav class="tabs">
-        <button data-view="customers" class="active">Customers</button>
+        <button data-view="board" class="active">Prep board <span class="count" id="count-open"></span></button>
+        <button data-view="online">Online orders <span class="count alert" id="count-online"></span></button>
+        <button data-view="customers">Customers</button>
         <button data-view="orders">All orders</button>
         <button data-view="new">＋ New order</button>
         <button data-view="import">Import from Excel</button>
       </nav>
 
+      <!-- Prep board: open orders as numbered tickets, in New / Preparing / Ready columns -->
+      <section id="view-board" class="hidden">
+        <div class="board-bar">
+          <p class="muted">Open orders, soonest pickup first. Tick items as they're cut &amp; packed, then move the order along.</p>
+          <div class="filters">
+            <input id="board-search" type="search" placeholder="Find order # or name" aria-label="Find order">
+            <button type="button" class="secondary" id="board-full">⛶ Full screen</button>
+          </div>
+        </div>
+        <div class="board">
+          <div class="board-col" data-status="new"><h2>New <span class="col-count"></span></h2><div class="col-body"></div></div>
+          <div class="board-col" data-status="preparing"><h2>Preparing <span class="col-count"></span></h2><div class="col-body"></div></div>
+          <div class="board-col" data-status="ready"><h2>Ready for pickup <span class="col-count"></span></h2><div class="col-body"></div></div>
+        </div>
+      </section>
+
+      <!-- Online orders from the website -->
+      <section id="view-online" class="hidden">
+        <div class="card online-head">
+          <div class="section-head">
+            <h2>Online orders</h2>
+            <div class="filters">
+              <select id="online-show" aria-label="Which online orders">
+                <option value="open">Unread &amp; open</option>
+                <option value="all">All online orders</option>
+              </select>
+              <button type="button" class="secondary" id="online-seen-all">✓ Mark all as seen</button>
+            </div>
+          </div>
+          <p class="muted" style="margin:0">Orders placed on the website appear here instantly. Your order page:
+            <a id="order-link" target="_blank" rel="noopener"></a>
+            <button type="button" class="link" id="copy-link">Copy link</button></p>
+        </div>
+        <div id="online-list" class="online-list"></div>
+        <div id="online-empty" class="card empty hidden"><p class="muted">No new online orders. New ones will pop up here (keep this page open).</p></div>
+      </section>
+
       <!-- Customers: list on the left, selected customer's orders on the right -->
-      <section id="view-customers" class="split">
+      <section id="view-customers" class="split hidden">
         <aside class="card list-pane">
           <input id="search" type="search" placeholder="Search name, phone, email or item…" aria-label="Search customers">
           <div class="muted list-count" id="customer-count"></div>
@@ -114,6 +154,7 @@
           <div class="grid">
             <div class="field"><label for="n-date">Order date</label><input id="n-date" type="date"></div>
             <div class="field"><label for="n-pickup">Pickup / delivery date</label><input id="n-pickup" type="date"></div>
+            <div class="field"><label for="n-time">Ready by (time)</label><input id="n-time" type="time" step="900"></div>
             <div class="field"><label for="n-fulfillment">Pickup or delivery</label>
               <select id="n-fulfillment"><option value="pickup">Pickup</option><option value="delivery">Delivery</option></select></div>
             <div class="field"><label for="n-status">Status</label><select id="n-status"></select></div>
@@ -176,6 +217,11 @@
       </section>
     </div>
   </main>
+
+  <!-- New-order pop-up -->
+  <div id="toast" class="toast hidden" role="status" aria-live="polite"></div>
+  <!-- Filled in when printing an order ticket -->
+  <div id="print-area" aria-hidden="true"></div>
 
 <script src="/admin.js"></script>
 </body>

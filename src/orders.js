@@ -54,13 +54,15 @@ function findOrCreateCustomer(db, { name, email, phone }, { refresh = false } = 
  */
 function insertOrder(db, o) {
   const total = o.items.reduce((sum, it) => sum + it.lineTotalCents, 0);
+  // Online orders start unread so they stand out on the Online orders tab; staff-entered/imported ones don't.
   const { id } = db.prepare(`
-    INSERT INTO orders (customer_id, status, fulfillment, pickup_date, delivery_address, notes, total_cents,
-                        created_at, source, order_ref, import_key)
-    VALUES (?, ?, ?, ?, ?, ?, ?, COALESCE(?, datetime('now')), ?, ?, ?) RETURNING id`).get(
-    o.customerId, o.status || 'new', o.fulfillment || 'pickup', o.pickupDate || null,
+    INSERT INTO orders (customer_id, status, fulfillment, pickup_date, pickup_time, delivery_address, notes, total_cents,
+                        created_at, source, order_ref, import_key, seen_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, COALESCE(?, datetime('now')), ?, ?, ?,
+            CASE WHEN ? = 'online' THEN NULL ELSE datetime('now') END) RETURNING id`).get(
+    o.customerId, o.status || 'new', o.fulfillment || 'pickup', o.pickupDate || null, o.pickupTime || null,
     o.fulfillment === 'delivery' ? o.deliveryAddress || null : null, o.notes || null, total,
-    o.createdAt || null, o.source || 'online', o.orderRef || null, o.importKey || null);
+    o.createdAt || null, o.source || 'online', o.orderRef || null, o.importKey || null, o.source || 'online');
 
   const insertItem = db.prepare(`
     INSERT INTO order_items (order_id, product_id, product_name, unit, quantity, unit_price_cents, line_total_cents, cut_instructions)
@@ -73,10 +75,26 @@ function insertOrder(db, o) {
 }
 
 function getOrderWithItems(db, orderId) {
-  const order = db.prepare('SELECT * FROM orders WHERE id = ?').get(orderId);
+  const order = db.prepare(`
+    SELECT o.*, c.name AS customer_name, c.phone AS customer_phone, c.email AS customer_email
+    FROM orders o JOIN customers c ON c.id = o.customer_id WHERE o.id = ?`).get(orderId);
   if (!order) return null;
   order.items = db.prepare('SELECT * FROM order_items WHERE order_id = ? ORDER BY id').all(orderId);
   return order;
 }
 
-module.exports = { findOrCreateCustomer, insertOrder, getOrderWithItems };
+/** Orders with their items, for the prep board and online-orders tab. */
+function listOrdersWithItems(db, where, params = [], orderBy = 'o.created_at DESC, o.id DESC', limit = 300) {
+  const orders = db.prepare(`
+    SELECT o.*, c.name AS customer_name, c.phone AS customer_phone, c.email AS customer_email
+    FROM orders o JOIN customers c ON c.id = o.customer_id
+    WHERE ${where} ORDER BY ${orderBy} LIMIT ${Number(limit)}`).all(...params);
+  if (!orders.length) return orders;
+  const items = db.prepare(`SELECT * FROM order_items WHERE order_id IN (${orders.map(() => '?').join(',')}) ORDER BY id`)
+    .all(...orders.map((o) => o.id));
+  const byOrder = new Map(orders.map((o) => [o.id, Object.assign(o, { items: [] })]));
+  for (const it of items) byOrder.get(it.order_id).items.push(it);
+  return orders;
+}
+
+module.exports = { findOrCreateCustomer, insertOrder, getOrderWithItems, listOrdersWithItems };

@@ -71,6 +71,7 @@ $('#order-form').addEventListener('submit', async (e) => {
     phone: $('#phone').value,
     fulfillment: $('#fulfillment').value,
     pickup_date: $('#pickup_date').value,
+    pickup_time: $('#pickup_time').value,
     delivery_address: $('#delivery_address').value,
     notes: $('#notes').value,
     items: items.map((it) => ({ product_id: it.product.id, quantity: it.quantity, cut_instructions: it.cut_instructions })),
@@ -85,7 +86,8 @@ $('#order-form').addEventListener('submit', async (e) => {
     });
     const data = await res.json();
     if (!res.ok) return showError(data.error || 'Could not place order.');
-    $('#done-msg').textContent = `Order #${data.id} · ${data.items.length} item(s) · estimated ${money(data.total_cents)}. We'll contact you at ${payload.email} if we have any questions.`;
+    $('#done-number').textContent = data.id;
+    $('#done-msg').textContent = `${data.items.length} item(s) · estimated ${money(data.total_cents)}. We'll contact you at ${payload.email} if we have any questions.`;
     saveDetails();
     f.classList.add('hidden');
     $('#done').classList.remove('hidden');

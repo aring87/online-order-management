@@ -31,13 +31,15 @@ CREATE TABLE IF NOT EXISTS orders (
                       CHECK (status IN ('new', 'preparing', 'ready', 'picked_up', 'cancelled')),
   fulfillment         TEXT NOT NULL DEFAULT 'pickup' CHECK (fulfillment IN ('pickup', 'delivery')),
   pickup_date         TEXT,
+  pickup_time         TEXT,                            -- 'HH:MM', optional "ready by" time
   delivery_address    TEXT,
   notes               TEXT,
   total_cents         INTEGER NOT NULL DEFAULT 0,
   created_at          TEXT NOT NULL DEFAULT (datetime('now')),
   source              TEXT NOT NULL DEFAULT 'online',  -- online | manual | import
   order_ref           TEXT,                            -- order number from an imported spreadsheet
-  import_key          TEXT UNIQUE                      -- prevents importing the same order twice
+  import_key          TEXT UNIQUE,                     -- prevents importing the same order twice
+  seen_at             TEXT                             -- when staff first saw an online order (NULL = unread)
 );
 
 CREATE TABLE IF NOT EXISTS order_items (
@@ -49,7 +51,8 @@ CREATE TABLE IF NOT EXISTS order_items (
   quantity          REAL NOT NULL CHECK (quantity > 0),
   unit_price_cents  INTEGER NOT NULL,
   line_total_cents  INTEGER NOT NULL,
-  cut_instructions  TEXT
+  cut_instructions  TEXT,
+  packed            INTEGER NOT NULL DEFAULT 0       -- ticked off on the prep board
 );
 
 CREATE INDEX IF NOT EXISTS idx_orders_customer ON orders(customer_id);
@@ -63,6 +66,14 @@ const phoneKey = (phone) => {
   return digits.length >= 7 ? digits.slice(-10) : null;
 };
 const nameKey = (name) => String(name || '').trim().toLowerCase().replace(/\s+/g, ' ') || null;
+
+// Add columns introduced after a database was created.
+function ensureColumn(db, table, column, definition, afterAdd) {
+  const cols = db.prepare(`PRAGMA table_info(${table})`).all().map((c) => c.name);
+  if (cols.includes(column)) return;
+  db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
+  if (afterAdd) db.exec(afterAdd);
+}
 
 // Upgrade databases created by the first version of the app.
 function migrate(db) {
@@ -128,6 +139,9 @@ function openDb(file) {
   db.exec('PRAGMA foreign_keys = ON; PRAGMA journal_mode = WAL;');
   migrate(db);
   db.exec(SCHEMA);
+  ensureColumn(db, 'orders', 'pickup_time', 'TEXT');
+  ensureColumn(db, 'orders', 'seen_at', 'TEXT', 'UPDATE orders SET seen_at = created_at');  // existing orders count as seen
+  ensureColumn(db, 'order_items', 'packed', 'INTEGER NOT NULL DEFAULT 0');
 
   const { n } = db.prepare('SELECT COUNT(*) AS n FROM products').get();
   if (n === 0) {

@@ -2,13 +2,21 @@
 
 const path = require('node:path');
 const crypto = require('node:crypto');
+const { EventEmitter } = require('node:events');
 const express = require('express');
 const { transaction } = require('./db');
-const { findOrCreateCustomer, insertOrder, getOrderWithItems } = require('./orders');
+const { findOrCreateCustomer, insertOrder, getOrderWithItems, listOrdersWithItems } = require('./orders');
 const { readSpreadsheet, importRows, FIELDS, ImportError } = require('./importer');
 
 const STATUSES = ['new', 'preparing', 'ready', 'picked_up', 'cancelled'];
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const OPEN_STATUSES = ['new', 'preparing', 'ready'];
+
+function time(v) {
+  const t = typeof v === 'string' ? v.trim() : '';
+  if (t && !/^([01]\d|2[0-3]):[0-5]\d$/.test(t)) throw new ValidationError('Invalid time.');
+  return t || null;
+}
 
 class ValidationError extends Error {}
 
@@ -22,6 +30,7 @@ function validateOrder(body, db) {
   const phone = str(body.phone, 40);
   const fulfillment = body.fulfillment === 'delivery' ? 'delivery' : 'pickup';
   const pickupDate = str(body.pickup_date, 20);
+  const pickupTime = time(body.pickup_time);
   const deliveryAddress = str(body.delivery_address, 300);
   const notes = str(body.notes, 1000);
 
@@ -49,7 +58,7 @@ function validateOrder(body, db) {
     };
   });
 
-  return { name, email, phone, fulfillment, pickupDate, deliveryAddress, notes, items };
+  return { name, email, phone, fulfillment, pickupDate, pickupTime, deliveryAddress, notes, items };
 }
 
 // ---------- Admin sessions ----------
@@ -148,6 +157,7 @@ function validateManualOrder(body, db) {
     order: {
       status, fulfillment,
       pickupDate: date(body.pickup_date),
+      pickupTime: time(body.pickup_time),
       createdAt: date(body.order_date) ? `${date(body.order_date)} 12:00:00` : null,
       deliveryAddress: str(body.delivery_address, 300),
       notes: str(body.notes, 1000),
@@ -169,6 +179,11 @@ function createApp(db, { adminPassword, sessionSecret = crypto.randomBytes(32).t
   // Spreadsheet imports can be large; they get their own body parsers after the login check.
   app.use((req, res, next) => (req.path.startsWith('/api/admin/import') ? next() : smallJson(req, res, next)));
 
+  // Live updates: every change is pushed to open admin screens (prep board, online orders…) instantly.
+  const events = new EventEmitter();
+  events.setMaxListeners(0);
+  const changed = (type, data = {}) => events.emit('change', { type, ...data });
+
   const limiter = loginLimiter();
   const isAdmin = (req) => validToken(sessionSecret, readCookie(req, COOKIE));
   const requireAdmin = (req, res, next) => (isAdmin(req) ? next() : res.status(401).json({ error: 'Please log in' }));
@@ -188,6 +203,7 @@ function createApp(db, { adminPassword, sessionSecret = crypto.randomBytes(32).t
         customerId: customer.id,
         fulfillment: o.fulfillment,
         pickupDate: o.pickupDate,
+        pickupTime: o.pickupTime,
         deliveryAddress: o.deliveryAddress,
         notes: o.notes,
         source: 'online',
@@ -198,6 +214,7 @@ function createApp(db, { adminPassword, sessionSecret = crypto.randomBytes(32).t
       });
       return getOrderWithItems(db, orderId);
     });
+    changed('online-order', { id: order.id, name: order.customer_name, total_cents: order.total_cents });
     res.status(201).json(order);
   });
 
@@ -273,6 +290,7 @@ function createApp(db, { adminPassword, sessionSecret = crypto.randomBytes(32).t
       const c = findOrCreateCustomer(db, customer);
       return getOrderWithItems(db, insertOrder(db, { ...order, customerId: c.id }));
     });
+    changed('order', { id: created.id });
     res.status(201).json(created);
   });
 
@@ -286,7 +304,76 @@ function createApp(db, { adminPassword, sessionSecret = crypto.randomBytes(32).t
       db.prepare('DELETE FROM customers WHERE id = ? AND NOT EXISTS (SELECT 1 FROM orders WHERE customer_id = ?)')
         .run(order.customer_id, order.customer_id);
     });
+    changed('order', { id });
     res.json({ ok: true });
+  });
+
+  // ---------- Live updates (Server-Sent Events) ----------
+  app.get('/api/admin/events', (req, res) => {
+    res.set({
+      'Content-Type': 'text/event-stream',
+      'Cache-Control': 'no-cache, no-transform',
+      Connection: 'keep-alive',
+      'X-Accel-Buffering': 'no',
+    });
+    res.flushHeaders();
+    res.write('retry: 3000\n\n');
+    const send = (e) => res.write(`event: change\ndata: ${JSON.stringify(e)}\n\n`);
+    const ping = setInterval(() => res.write(': ping\n\n'), 25000);
+    events.on('change', send);
+    req.on('close', () => { clearInterval(ping); events.off('change', send); });
+  });
+
+  // Badge numbers for the tabs.
+  app.get('/api/admin/counts', (req, res) => {
+    res.json(db.prepare(`
+      SELECT
+        (SELECT COUNT(*) FROM orders WHERE source = 'online' AND seen_at IS NULL) AS unseen_online,
+        (SELECT COUNT(*) FROM orders WHERE status IN ('new', 'preparing', 'ready')) AS open_orders`).get());
+  });
+
+  // ---------- Prep board ----------
+  // Open orders with items, soonest pickup first (orders with no date go last, oldest first).
+  app.get('/api/admin/board', (req, res) => {
+    res.json(listOrdersWithItems(db, `o.status IN (${OPEN_STATUSES.map(() => '?').join(',')})`, OPEN_STATUSES,
+      `o.pickup_date IS NULL, o.pickup_date, o.pickup_time IS NULL, o.pickup_time, o.created_at, o.id`, 500));
+  });
+
+  // Tick an item off as cut & packed.
+  app.patch('/api/admin/items/:id', (req, res) => {
+    const id = Number(req.params.id);
+    const packed = req.body?.packed ? 1 : 0;
+    const item = db.prepare('UPDATE order_items SET packed = ? WHERE id = ? RETURNING *').get(packed, id);
+    if (!item) return res.status(404).json({ error: 'Item not found' });
+    // Starting to pack a New order moves it to Preparing automatically.
+    if (packed) db.prepare("UPDATE orders SET status = 'preparing' WHERE id = ? AND status = 'new'").run(item.order_id);
+    changed('order', { id: item.order_id });
+    res.json(getOrderWithItems(db, item.order_id));
+  });
+
+  // ---------- Online orders ----------
+  app.get('/api/admin/online', (req, res) => {
+    const show = req.query.show === 'all' ? '1 = 1' : "(o.seen_at IS NULL OR o.status IN ('new', 'preparing', 'ready'))";
+    res.json(listOrdersWithItems(db, `o.source = 'online' AND ${show}`, [], 'o.seen_at IS NOT NULL, o.created_at DESC, o.id DESC', 200));
+  });
+
+  app.post('/api/admin/orders/:id/seen', (req, res) => {
+    const r = db.prepare("UPDATE orders SET seen_at = COALESCE(seen_at, datetime('now')) WHERE id = ?").run(Number(req.params.id));
+    if (r.changes === 0) return res.status(404).json({ error: 'Order not found' });
+    changed('seen');
+    res.json({ ok: true });
+  });
+
+  app.post('/api/admin/online/seen-all', (req, res) => {
+    db.prepare("UPDATE orders SET seen_at = datetime('now') WHERE source = 'online' AND seen_at IS NULL").run();
+    changed('seen');
+    res.json({ ok: true });
+  });
+
+  app.get('/api/admin/orders/:id', (req, res) => {
+    const order = getOrderWithItems(db, Number(req.params.id));
+    if (!order) return res.status(404).json({ error: 'Order not found' });
+    res.json(order);
   });
 
   // ---------- Spreadsheet import / export ----------
@@ -303,26 +390,28 @@ function createApp(db, { adminPassword, sessionSecret = crypto.randomBytes(32).t
 
   app.post('/api/admin/import', express.json({ limit: '50mb' }), (req, res) => {
     const { headers, rows, mapping, status } = req.body || {};
-    res.json(importRows(db, {
+    const result = importRows(db, {
       headers, rows, mapping: mapping || {},
       status: STATUSES.includes(status) ? status : 'picked_up',
-    }));
+    });
+    if (result.orders_created) changed('import');
+    res.json(result);
   });
 
   // Everything as a spreadsheet (one row per item) — opens directly in Excel.
   app.get('/api/admin/export.csv', (req, res) => {
     const rows = db.prepare(`
-      SELECT o.id, o.order_ref, o.created_at, o.status, o.fulfillment, o.pickup_date, o.delivery_address, o.notes,
+      SELECT o.id, o.order_ref, o.created_at, o.status, o.fulfillment, o.pickup_date, o.pickup_time, o.delivery_address, o.notes,
              o.total_cents, o.source, c.name, c.email, c.phone,
              i.product_name, i.quantity, i.unit, i.unit_price_cents, i.line_total_cents, i.cut_instructions
       FROM orders o JOIN customers c ON c.id = o.customer_id LEFT JOIN order_items i ON i.order_id = o.id
       ORDER BY c.name COLLATE NOCASE, o.created_at, o.id, i.id`).all();
     const money = (c) => (c == null ? '' : (c / 100).toFixed(2));
     const header = ['Order #', 'Order ref', 'Order date', 'Status', 'Customer', 'Email', 'Phone', 'Pickup/Delivery',
-      'Pickup date', 'Delivery address', 'Item', 'Quantity', 'Unit', 'Unit price', 'Line total', 'Cut instructions',
+      'Pickup date', 'Ready by', 'Delivery address', 'Item', 'Quantity', 'Unit', 'Unit price', 'Line total', 'Cut instructions',
       'Order notes', 'Order total', 'Source'];
     const lines = [header, ...rows.map((r) => [r.id, r.order_ref, r.created_at.slice(0, 10), r.status, r.name, r.email,
-      r.phone, r.fulfillment, r.pickup_date, r.delivery_address, r.product_name, r.quantity, r.unit,
+      r.phone, r.fulfillment, r.pickup_date, r.pickup_time, r.delivery_address, r.product_name, r.quantity, r.unit,
       money(r.unit_price_cents), money(r.line_total_cents), r.cut_instructions, r.notes, money(r.total_cents), r.source])];
     const csv = '\uFEFF' + lines.map((l) => l.map(csvCell).join(',')).join('\r\n') + '\r\n';
     const today = new Date().toISOString().slice(0, 10);
@@ -336,6 +425,7 @@ function createApp(db, { adminPassword, sessionSecret = crypto.randomBytes(32).t
     if (!STATUSES.includes(status)) return res.status(400).json({ error: 'Invalid status' });
     const result = db.prepare('UPDATE orders SET status = ? WHERE id = ?').run(status, Number(req.params.id));
     if (result.changes === 0) return res.status(404).json({ error: 'Order not found' });
+    changed('order', { id: Number(req.params.id) });
     res.json(getOrderWithItems(db, Number(req.params.id)));
   });
 
