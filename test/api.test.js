@@ -5,7 +5,14 @@ const assert = require('node:assert/strict');
 const { openDb } = require('../src/db');
 const { createApp } = require('../src/app');
 
-const AUTH = { Authorization: 'Basic ' + Buffer.from('admin:secret').toString('base64') };
+let AUTH; // set per server by logging in
+
+async function login(req, password = 'secret') {
+  const res = await fetch(req.base + '/api/admin/login', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ password }),
+  });
+  return { status: res.status, cookie: (res.headers.get('set-cookie') || '').split(';')[0] };
+}
 
 async function withServer(fn) {
   const db = openDb(':memory:');
@@ -22,6 +29,8 @@ async function withServer(fn) {
     let data; try { data = JSON.parse(text); } catch { data = text; }
     return { status: res.status, data };
   };
+  req.base = base;
+  AUTH = { Cookie: (await login(req)).cookie };
   try { await fn(req); } finally { server.close(); }
 }
 
@@ -92,11 +101,31 @@ test('rejects invalid orders', () => withServer(async (req) => {
   assert.equal(customers.length, 0, 'nothing saved on failure');
 }));
 
-test('admin endpoints require the password', () => withServer(async (req) => {
+test('admin endpoints require login', () => withServer(async (req) => {
   assert.equal((await req('/api/admin/customers')).status, 401);
-  assert.equal((await req('/admin')).status, 401);
-  const wrong = { Authorization: 'Basic ' + Buffer.from('admin:nope').toString('base64') };
-  assert.equal((await req('/api/admin/customers', { headers: wrong })).status, 401);
-  assert.equal((await req('/admin', { headers: AUTH })).status, 200);
-  assert.equal((await req('/admin.html')).status, 404, 'admin page not exposed statically');
+  assert.equal((await req('/api/admin/session')).status, 401);
+  assert.equal((await login(req, 'nope')).status, 401);
+  assert.equal((await req('/api/admin/customers', { headers: { Cookie: 'admin_session=123.forged' } })).status, 401);
+
+  const ok = await login(req);
+  assert.equal(ok.status, 200);
+  assert.match(ok.cookie, /^admin_session=/);
+  assert.equal((await req('/api/admin/session', { headers: { Cookie: ok.cookie } })).status, 200);
+  assert.equal((await req('/api/admin/customers', { headers: { Cookie: ok.cookie } })).status, 200);
+
+  // Admin page shell is public (it shows a login form); data is not.
+  assert.equal((await req('/admin')).status, 200);
+}));
+
+test('locks out repeated wrong passwords', () => withServer(async (req) => {
+  for (let i = 0; i < 10; i++) assert.equal((await login(req, 'wrong')).status, 401);
+  assert.equal((await login(req)).status, 429);
+}));
+
+test('serves phone-app files', () => withServer(async (req) => {
+  for (const path of ['/manifest.webmanifest', '/admin.webmanifest', '/sw.js', '/icons/icon-192.png', '/icons/admin-icon-512.png']) {
+    assert.equal((await req(path)).status, 200, path);
+  }
+  const { data: manifest } = await req('/manifest.webmanifest');
+  assert.equal(manifest.display, 'standalone');
 }));

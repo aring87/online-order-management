@@ -2,17 +2,32 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>Order Online — Butcher Shop</title>
+  <meta name="theme-color" content="#9b2c2c">
+  <meta name="description" content="Order fresh cuts for pickup or delivery.">
+  <link rel="manifest" href="/manifest.webmanifest">
+  <link rel="icon" href="/icons/icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="/icons/icon-180.png">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="Butcher Shop">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <link rel="stylesheet" href="/styles.css">
 </head>
 <body>
   <header class="top">
     <div class="wrap">
-      <h1>Butcher Shop — Order Online</h1>
-      <span class="muted" style="color:#fff">Fresh cuts, prepared to order</span>
+      <div>
+        <h1>Butcher Shop</h1>
+        <div class="tagline">Fresh cuts, prepared to order</div>
+      </div>
+      <button id="install" class="install hidden" type="button">Install app</button>
     </div>
   </header>
+  <div id="install-hint" class="install-hint hidden">
+    <div class="wrap">To install on iPhone: tap <b>Share</b> <span aria-hidden="true">⎋</span> then <b>Add to Home Screen</b>.</div>
+  </div>
 
   <main class="wrap">
     <div id="done" class="card hidden">
@@ -35,9 +50,10 @@
         <h2>2. Your details</h2>
         <div class="grid">
           <div class="field"><label for="name">Full name *</label><input id="name" name="name" autocomplete="name" required></div>
-          <div class="field"><label for="email">Email *</label><input id="email" name="email" type="email" autocomplete="email" required></div>
-          <div class="field"><label for="phone">Phone *</label><input id="phone" name="phone" type="tel" autocomplete="tel" required></div>
+          <div class="field"><label for="email">Email *</label><input id="email" name="email" type="email" inputmode="email" autocomplete="email" autocapitalize="off" required></div>
+          <div class="field"><label for="phone">Phone *</label><input id="phone" name="phone" type="tel" inputmode="tel" autocomplete="tel" required></div>
         </div>
+        <label class="check"><input type="checkbox" id="remember" checked> Remember my details on this device</label>
         <div class="grid">
           <div class="field">
             <label for="fulfillment">Pickup or delivery</label>
@@ -71,6 +87,7 @@
     </form>
   </main>
 
+  <script src="/app.js"></script>
   <script src="/order.js"></script>
 </body>
 </html>

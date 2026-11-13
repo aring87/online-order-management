@@ -21,7 +21,7 @@ async function loadProducts() {
           <div class="price">${money(p.price_cents)} / ${p.unit}</div>
         </div>
         <div>
-          <input class="qty" type="number" min="0" step="${p.unit === 'lb' ? '0.25' : '1'}" placeholder="${p.unit === 'lb' ? 'lbs' : 'qty'}" aria-label="Quantity of ${esc(p.name)} (${p.unit})">
+          <input class="qty" type="number" inputmode="${p.unit === 'lb' ? 'decimal' : 'numeric'}" min="0" step="${p.unit === 'lb' ? '0.25' : '1'}" placeholder="${p.unit === 'lb' ? 'lbs' : 'qty'}" aria-label="Quantity of ${esc(p.name)} (${p.unit})">
         </div>
         <div class="cut"><input class="cut-in" placeholder="Cut instructions (optional)" aria-label="Cut instructions for ${esc(p.name)}" maxlength="300"></div>
       </div>`).join('')}
@@ -86,6 +86,7 @@ $('#order-form').addEventListener('submit', async (e) => {
     const data = await res.json();
     if (!res.ok) return showError(data.error || 'Could not place order.');
     $('#done-msg').textContent = `Order #${data.id} · ${data.items.length} item(s) · estimated ${money(data.total_cents)}. We'll contact you at ${payload.email} if we have any questions.`;
+    saveDetails();
     f.classList.add('hidden');
     $('#done').classList.remove('hidden');
     window.scrollTo(0, 0);
@@ -99,13 +100,38 @@ $('#order-form').addEventListener('submit', async (e) => {
 $('#another').addEventListener('click', () => {
   $('#order-form').reset();
   document.querySelectorAll('.qty, .cut-in').forEach((i) => { i.value = ''; });
+  restoreDetails();
   $('#address-field').classList.add('hidden');
   updateTotal();
   $('#done').classList.add('hidden');
   $('#order-form').classList.remove('hidden');
 });
 
+// Remember contact details on this device so repeat orders are quick.
+const DETAILS_KEY = 'butcher-details';
+const DETAIL_FIELDS = ['name', 'email', 'phone', 'delivery_address'];
+function saveDetails() {
+  try {
+    if ($('#remember').checked) {
+      localStorage.setItem(DETAILS_KEY, JSON.stringify(Object.fromEntries(DETAIL_FIELDS.map((k) => [k, $(`#${k}`).value]))));
+    } else {
+      localStorage.removeItem(DETAILS_KEY);
+    }
+  } catch { /* storage unavailable */ }
+}
+function restoreDetails() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(DETAILS_KEY) || 'null');
+    if (saved) for (const k of DETAIL_FIELDS) if (saved[k]) $(`#${k}`).value = saved[k];
+  } catch { /* storage unavailable */ }
+}
+
 const today = new Date();
 $('#pickup_date').min = new Date(today.getTime() - today.getTimezoneOffset() * 60000).toISOString().slice(0, 10);
 
-loadProducts().catch(() => { $('#products').textContent = 'Could not load products. Please refresh.'; });
+restoreDetails();
+loadProducts().catch(() => {
+  $('#products').textContent = navigator.onLine === false
+    ? "You're offline. Connect to the internet to see today's cuts and place an order."
+    : 'Could not load products. Please refresh.';
+});

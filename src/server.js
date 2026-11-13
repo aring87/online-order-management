@@ -13,10 +13,13 @@ if (!process.env.ADMIN_PASSWORD) {
 }
 
 const db = openDb(DB_FILE);
-const app = createApp(db, { adminPassword: ADMIN_PASSWORD });
+// Set SESSION_SECRET to keep staff logged in across server restarts.
+const app = createApp(db, { adminPassword: ADMIN_PASSWORD, sessionSecret: process.env.SESSION_SECRET || undefined });
+// Behind a hosting proxy (Render, Railway, Fly, nginx…) this makes HTTPS detection and IPs correct.
+if (process.env.TRUST_PROXY) app.set('trust proxy', process.env.TRUST_PROXY === 'true' ? true : process.env.TRUST_PROXY);
 
 app.listen(PORT, () => {
   console.log(`Order form:  http://localhost:${PORT}/`);
-  console.log(`Admin:       http://localhost:${PORT}/admin  (any username, password = ADMIN_PASSWORD)`);
+  console.log(`Admin:       http://localhost:${PORT}/admin  (password = ADMIN_PASSWORD)`);
   console.log(`Database:    ${DB_FILE}`);
 });

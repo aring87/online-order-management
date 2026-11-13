@@ -50,17 +50,59 @@ function validateOrder(body, db) {
   return { name, email, phone, fulfillment, pickupDate, deliveryAddress, notes, items };
 }
 
-function adminAuth(password) {
-  const expected = Buffer.from(password);
-  return (req, res, next) => {
-    const header = req.headers.authorization || '';
-    const [scheme, encoded] = header.split(' ');
-    if (scheme === 'Basic' && encoded) {
-      const decoded = Buffer.from(encoded, 'base64').toString();
-      const given = Buffer.from(decoded.slice(decoded.indexOf(':') + 1));
-      if (given.length === expected.length && crypto.timingSafeEqual(given, expected)) return next();
-    }
-    res.set('WWW-Authenticate', 'Basic realm="Butcher Admin"').status(401).send('Authentication required');
+// ---------- Admin sessions ----------
+// A signed, HttpOnly cookie keeps staff logged in (works in home-screen apps,
+// unlike browser Basic-auth prompts).
+const COOKIE = 'admin_session';
+const SESSION_DAYS = 30;
+
+function sign(secret, value) {
+  return crypto.createHmac('sha256', secret).update(value).digest('base64url');
+}
+
+function makeToken(secret) {
+  const expires = String(Date.now() + SESSION_DAYS * 864e5);
+  return `${expires}.${sign(secret, expires)}`;
+}
+
+function validToken(secret, token) {
+  const [expires, sig] = String(token || '').split('.');
+  if (!expires || !sig) return false;
+  const expected = Buffer.from(sign(secret, expires));
+  const given = Buffer.from(sig);
+  return given.length === expected.length && crypto.timingSafeEqual(given, expected) && Number(expires) > Date.now();
+}
+
+function readCookie(req, name) {
+  for (const part of (req.headers.cookie || '').split(';')) {
+    const i = part.indexOf('=');
+    if (i > 0 && part.slice(0, i).trim() === name) return decodeURIComponent(part.slice(i + 1).trim());
+  }
+  return null;
+}
+
+function passwordMatches(given, password) {
+  const a = crypto.createHash('sha256').update(String(given ?? '')).digest();
+  const b = crypto.createHash('sha256').update(password).digest();
+  return crypto.timingSafeEqual(a, b);
+}
+
+// Simple in-memory brute-force protection: 10 failed logins per IP per 15 min.
+function loginLimiter() {
+  const failures = new Map();
+  const WINDOW = 15 * 60 * 1000;
+  return {
+    blocked(ip) {
+      const f = failures.get(ip);
+      if (f && Date.now() - f.start > WINDOW) failures.delete(ip);
+      return (failures.get(ip)?.count || 0) >= 10;
+    },
+    fail(ip) {
+      const f = failures.get(ip) || { count: 0, start: Date.now() };
+      f.count += 1;
+      failures.set(ip, f);
+    },
+    reset(ip) { failures.delete(ip); },
   };
 }
 
@@ -71,11 +113,14 @@ function getOrderWithItems(db, orderId) {
   return order;
 }
 
-function createApp(db, { adminPassword }) {
+function createApp(db, { adminPassword, sessionSecret = crypto.randomBytes(32).toString('hex') }) {
   const app = express();
   app.use(express.json({ limit: '100kb' }));
 
-  const requireAdmin = adminAuth(adminPassword);
+  const limiter = loginLimiter();
+  const isAdmin = (req) => validToken(sessionSecret, readCookie(req, COOKIE));
+  const requireAdmin = (req, res, next) => (isAdmin(req) ? next() : res.status(401).json({ error: 'Please log in' }));
+  const cookieOpts = (req) => `Path=/; HttpOnly; SameSite=Lax${req.secure ? '; Secure' : ''}`;
 
   // ---------- Public ----------
   app.get('/api/products', (req, res) => {
@@ -111,8 +156,28 @@ function createApp(db, { adminPassword }) {
   });
 
   // ---------- Admin ----------
-  app.get('/admin', requireAdmin, (req, res) => res.sendFile(path.join(__dirname, 'views', 'admin.html')));
+  // The admin page itself holds no data; it shows a login screen until the API accepts the session.
+  app.get('/admin', (req, res) => res.sendFile(path.join(__dirname, '..', 'public', 'admin.html')));
+
+  app.post('/api/admin/login', (req, res) => {
+    const ip = req.ip;
+    if (limiter.blocked(ip)) return res.status(429).json({ error: 'Too many attempts. Try again in 15 minutes.' });
+    if (!passwordMatches(req.body?.password, adminPassword)) {
+      limiter.fail(ip);
+      return res.status(401).json({ error: 'Wrong password' });
+    }
+    limiter.reset(ip);
+    res.set('Set-Cookie', `${COOKIE}=${makeToken(sessionSecret)}; Max-Age=${SESSION_DAYS * 86400}; ${cookieOpts(req)}`);
+    res.json({ ok: true });
+  });
+
+  app.post('/api/admin/logout', (req, res) => {
+    res.set('Set-Cookie', `${COOKIE}=; Max-Age=0; ${cookieOpts(req)}`);
+    res.json({ ok: true });
+  });
+
   app.use('/api/admin', requireAdmin);
+  app.get('/api/admin/session', (req, res) => res.json({ ok: true }));
 
   app.get('/api/admin/customers', (req, res) => {
     const q = `%${str(req.query.q, 100)}%`;
@@ -154,7 +219,14 @@ function createApp(db, { adminPassword }) {
     res.json(getOrderWithItems(db, Number(req.params.id)));
   });
 
-  app.use(express.static(path.join(__dirname, '..', 'public'), { index: 'index.html' }));
+  app.use(express.static(path.join(__dirname, '..', 'public'), {
+    index: 'index.html',
+    extensions: ['html'],
+    setHeaders(res, file) {
+      // The service worker must always be fetched fresh so app updates roll out.
+      if (file.endsWith('sw.js')) res.set('Cache-Control', 'no-cache');
+    },
+  }));
 
   // eslint-disable-next-line no-unused-vars
   app.use((err, req, res, next) => {

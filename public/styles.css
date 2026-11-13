@@ -20,12 +20,28 @@ body {
 header.top {
   background: var(--accent);
   color: #fff;
-  padding: 18px 16px;
+  /* room for the phone status bar / notch when installed as an app */
+  padding: calc(16px + env(safe-area-inset-top)) 0 16px;
 }
-header.top .wrap { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+body.admin header.top { background: #3b2a24; }
+header.top .wrap { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+header.top .tagline { font-size: .9rem; opacity: .85; }
+.header-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+button.install {
+  background: rgba(255, 255, 255, .15);
+  border: 1px solid rgba(255, 255, 255, .45);
+  padding: 7px 12px;
+  font-size: .9rem;
+}
+button.install:hover { background: rgba(255, 255, 255, .25); }
+.install-hint { background: #fff4d6; color: #5c4300; padding: 10px 0; font-size: .92rem; }
 header.top h1 { margin: 0; font-size: 1.4rem; }
 header.top a { color: #fff; opacity: .85; }
-.wrap { max-width: 1040px; margin: 0 auto; padding: 0 16px; }
+.wrap {
+  max-width: 1040px;
+  margin: 0 auto;
+  padding: 0 max(16px, env(safe-area-inset-right)) 0 max(16px, env(safe-area-inset-left));
+}
 main.wrap { padding-top: 24px; padding-bottom: 48px; }
 .card {
   background: var(--card);
@@ -48,6 +64,7 @@ input, select, textarea {
 input:focus, select:focus, textarea:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
 .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 14px; }
 .field { margin-bottom: 12px; }
+a.btn { display: inline-block; text-decoration: none; }
 button, .btn {
   font: inherit;
   font-weight: 600;
@@ -59,7 +76,7 @@ button, .btn {
   cursor: pointer;
 }
 button:hover { background: var(--accent-dark); }
-button.secondary { background: #fff; color: var(--text); border: 1px solid var(--border); }
+button.secondary, .btn.secondary { background: #fff; color: var(--text); border: 1px solid var(--border); }
 button:disabled { opacity: .6; cursor: default; }
 .muted { color: var(--muted); font-size: .9rem; }
 .error { background: #fdecec; color: var(--accent-dark); border: 1px solid #f3c2c2; padding: 10px 12px; border-radius: 7px; margin-bottom: 12px; }
@@ -82,7 +99,15 @@ button:disabled { opacity: .6; cursor: default; }
   .product-row { grid-template-columns: 1fr 90px; }
   .product-row .cut { grid-column: 1 / -1; }
 }
-.summary { position: sticky; bottom: 0; background: var(--card); border-top: 2px solid var(--accent); }
+.summary {
+  position: sticky;
+  bottom: 0;
+  background: var(--card);
+  border-top: 2px solid var(--accent);
+  padding-bottom: calc(20px + env(safe-area-inset-bottom));
+  margin-bottom: 0;
+  box-shadow: 0 -4px 14px rgba(0, 0, 0, .06);
+}
 .summary .total { font-size: 1.25rem; font-weight: 700; }
 
 /* Tables */
@@ -115,3 +140,39 @@ tr.clickable:hover { background: #fbf3ef; }
 .stat { background: var(--bg); border-radius: 8px; padding: 10px 14px; min-width: 120px; }
 .stat .v { font-size: 1.2rem; font-weight: 700; }
 .stat .l { font-size: .8rem; color: var(--muted); }
+
+.check { display: flex; align-items: center; gap: 8px; font-weight: 400; margin: -2px 0 14px; }
+.check input { width: auto; }
+.section-head { display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; align-items: center; margin-bottom: 12px; }
+.section-head h2 { margin: 0; }
+.section-head input, .section-head select { max-width: 320px; }
+.login { max-width: 380px; margin: 40px auto; }
+.contact-actions { display: flex; gap: 8px; flex-wrap: wrap; margin: 0 0 6px; }
+.contact-actions .btn { padding: 8px 12px; font-size: .9rem; font-weight: 500; }
+.notes { margin: 0 0 10px; }
+.order-total { display: flex; justify-content: flex-end; gap: 16px; padding: 10px 10px 0; font-size: 1.05rem; }
+
+/* ---------- Phone layout ---------- */
+@media (max-width: 700px) {
+  main.wrap { padding-top: 16px; }
+  .card { padding: 16px; border-radius: 12px; }
+  header.top h1 { font-size: 1.25rem; }
+  .section-head input, .section-head select { max-width: none; }
+  .order { padding: 12px; }
+  .order-head select { width: 100%; }
+  .order-total { padding-right: 0; }
+  .hide-mobile { display: none !important; }
+
+  /* Tables turn into stacked cards: each row is a card, each cell is "Label   value". */
+  table.stack thead { display: none; }
+  table.stack, table.stack tbody, table.stack tr, table.stack td { display: block; width: 100%; }
+  table.stack tr { border: 1px solid var(--border); border-radius: 10px; padding: 10px 12px; margin-bottom: 10px; background: #fff; }
+  table.stack td { border: 0; padding: 3px 0; text-align: right; display: flex; justify-content: space-between; gap: 12px; }
+  table.stack td::before { content: attr(data-label); color: var(--muted); font-size: .85rem; text-align: left; flex-shrink: 0; }
+  table.stack td.primary { display: block; text-align: left; font-size: 1.02rem; padding-bottom: 6px; }
+  table.stack td.primary::before { content: none; }
+  table.stack td select { width: auto; max-width: 65%; }
+  table.items tr { margin-bottom: 8px; background: var(--bg); border: 0; }
+  table.stack td.cut-note { display: block; text-align: left; background: #fff7e6; border-radius: 6px; padding: 6px 8px; margin-top: 4px; }
+  table.stack td.cut-note::before { display: block; content: "Cut instructions"; font-size: .75rem; }
+}

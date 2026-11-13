@@ -1,0 +1,305 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Orders Admin — Butcher Shop</title>
+  <meta name="theme-color" content="#3b2a24">
+  <link rel="manifest" href="/admin.webmanifest">
+  <link rel="icon" href="/icons/admin-icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="/icons/admin-icon-180.png">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="Orders Admin">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body class="admin">
+  <header class="top">
+    <div class="wrap">
+      <h1>Orders Admin</h1>
+      <div class="header-actions">
+        <button id="install" class="install hidden" type="button">Install app</button>
+        <button id="refresh" class="install hidden" type="button" aria-label="Refresh">↻ Refresh</button>
+        <button id="logout" class="install hidden" type="button">Log out</button>
+      </div>
+    </div>
+  </header>
+  <div id="install-hint" class="install-hint hidden">
+    <div class="wrap">To install on iPhone: tap <b>Share</b> <span aria-hidden="true">⎋</span> then <b>Add to Home Screen</b>.</div>
+  </div>
+
+  <main class="wrap">
+    <!-- Login -->
+    <section id="view-login" class="card login hidden">
+      <h2>Staff login</h2>
+      <form id="login-form">
+        <div id="login-error" class="error hidden"></div>
+        <div class="field">
+          <label for="password">Password</label>
+          <input id="password" type="password" autocomplete="current-password" required>
+        </div>
+        <button type="submit" style="width:100%">Log in</button>
+      </form>
+    </section>
+
+    <div id="app" class="hidden">
+      <div class="tabs">
+        <button data-view="customers" class="active">Customers</button>
+        <button data-view="orders">All orders</button>
+      </div>
+
+      <!-- Customers list -->
+      <section id="view-customers" class="card">
+        <div class="section-head">
+          <h2>Customers</h2>
+          <input id="search" type="search" placeholder="Search name, email or phone" enterkeyhint="search">
+        </div>
+        <table class="stack">
+          <thead><tr><th>Customer</th><th>Contact</th><th class="num">Orders</th><th class="num">Open</th><th class="num">Total spent</th><th>Last order</th></tr></thead>
+          <tbody id="customers-body"></tbody>
+        </table>
+        <p id="customers-empty" class="muted hidden">No customers yet.</p>
+      </section>
+
+      <!-- Single customer -->
+      <section id="view-customer" class="hidden">
+        <p><button class="secondary" id="back">← All customers</button></p>
+        <div class="card" id="customer-head"></div>
+        <div class="card">
+          <h2>Order history</h2>
+          <div id="customer-orders"></div>
+        </div>
+      </section>
+
+      <!-- All orders -->
+      <section id="view-orders" class="card hidden">
+        <div class="section-head">
+          <h2>All orders</h2>
+          <select id="status-filter" aria-label="Filter by status"><option value="">All statuses</option></select>
+        </div>
+        <table class="stack">
+          <thead><tr><th>#</th><th>Placed</th><th>Customer</th><th>For</th><th class="num">Items</th><th class="num">Total</th><th>Status</th></tr></thead>
+          <tbody id="orders-body"></tbody>
+        </table>
+        <p id="orders-empty" class="muted hidden">No orders.</p>
+      </section>
+    </div>
+  </main>
+
+<script src="/app.js"></script>
+<script>
+'use strict';
+const $ = (s) => document.querySelector(s);
+const money = (c) => `$${(c / 100).toFixed(2)}`;
+const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const STATUSES = { new: 'New', preparing: 'Preparing', ready: 'Ready', picked_up: 'Picked up / Delivered', cancelled: 'Cancelled' };
+const when = (s) => s ? new Date(s.replace(' ', 'T') + 'Z').toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' }) : '—';
+const day = (s) => s ? new Date(s + 'T00:00').toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' }) : 'no date';
+const badge = (st) => `<span class="badge ${st}">${STATUSES[st] || st}</span>`;
+const qty = (it) => it.unit === 'lb' ? `${it.quantity} lb` : `${it.quantity} ×`;
+
+class AuthError extends Error {}
+
+async function api(url, opts) {
+  const res = await fetch(url, { credentials: 'same-origin', ...opts });
+  if (res.status === 401) { showLogin(); throw new AuthError('Please log in'); }
+  if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || res.statusText);
+  return res.json();
+}
+
+// ----- Login -----
+function showLogin() {
+  $('#app').classList.add('hidden');
+  $('#refresh').classList.add('hidden');
+  $('#logout').classList.add('hidden');
+  $('#view-login').classList.remove('hidden');
+  $('#password').focus();
+}
+function showApp() {
+  $('#view-login').classList.add('hidden');
+  $('#app').classList.remove('hidden');
+  $('#refresh').classList.remove('hidden');
+  $('#logout').classList.remove('hidden');
+}
+
+$('#login-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  $('#login-error').classList.add('hidden');
+  const res = await fetch('/api/admin/login', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ password: $('#password').value }),
+  }).catch(() => null);
+  if (!res || !res.ok) {
+    const msg = res ? (await res.json().catch(() => ({}))).error : 'Network error — are you online?';
+    $('#login-error').textContent = msg || 'Could not log in';
+    $('#login-error').classList.remove('hidden');
+    return;
+  }
+  $('#password').value = '';
+  showApp();
+  route();
+});
+
+$('#logout').addEventListener('click', async () => {
+  await fetch('/api/admin/logout', { method: 'POST' }).catch(() => {});
+  showLogin();
+});
+
+// ----- Views -----
+function show(view) {
+  for (const v of ['customers', 'customer', 'orders']) $(`#view-${v}`).classList.toggle('hidden', v !== view);
+  document.querySelectorAll('.tabs button').forEach((b) =>
+    b.classList.toggle('active', b.dataset.view === (view === 'customer' ? 'customers' : view)));
+}
+
+// ----- Customers -----
+let searchTimer;
+async function loadCustomers() {
+  const list = await api(`/api/admin/customers?q=${encodeURIComponent($('#search').value)}`);
+  $('#customers-empty').classList.toggle('hidden', list.length > 0);
+  $('#customers-body').innerHTML = list.map((c) => `
+    <tr class="clickable" data-id="${c.id}">
+      <td class="primary"><b>${esc(c.name)}</b>${c.open_orders ? ` <span class="badge new">${c.open_orders} open</span>` : ''}</td>
+      <td data-label="Contact">${esc(c.email)}<br><span class="muted">${esc(c.phone)}</span></td>
+      <td data-label="Orders" class="num">${c.order_count}</td>
+      <td data-label="Open" class="num hide-mobile">${c.open_orders || 0}</td>
+      <td data-label="Total spent" class="num">${money(c.total_spent_cents)}</td>
+      <td data-label="Last order">${when(c.last_order_at)}</td>
+    </tr>`).join('');
+}
+$('#search').addEventListener('input', () => { clearTimeout(searchTimer); searchTimer = setTimeout(loadCustomers, 200); });
+$('#customers-body').addEventListener('click', (e) => {
+  const row = e.target.closest('tr[data-id]');
+  if (row) location.hash = `customer/${row.dataset.id}`;
+});
+
+// ----- One customer -----
+function statusSelect(order) {
+  return `<select class="status" data-order="${order.id}" aria-label="Status for order ${order.id}">
+    ${Object.entries(STATUSES).map(([k, v]) => `<option value="${k}" ${k === order.status ? 'selected' : ''}>${v}</option>`).join('')}
+  </select>`;
+}
+
+function renderOrder(o) {
+  return `
+  <div class="order">
+    <div class="order-head">
+      <div><span class="title">Order #${o.id}</span> ${badge(o.status)}<div class="muted">Placed ${when(o.created_at)}</div></div>
+      ${statusSelect(o)}
+    </div>
+    <div class="kv">
+      <span><b>${o.fulfillment === 'delivery' ? 'Delivery' : 'Pickup'}:</b>${day(o.pickup_date)}</span>
+      ${o.delivery_address ? `<span><b>Address:</b><a href="https://maps.google.com/?q=${encodeURIComponent(o.delivery_address)}" target="_blank" rel="noopener">${esc(o.delivery_address)}</a></span>` : ''}
+    </div>
+    ${o.notes ? `<p class="notes"><b class="muted">Notes:</b> ${esc(o.notes)}</p>` : ''}
+    <table class="stack items">
+      <thead><tr><th>Item</th><th class="num">Qty</th><th class="num">Price</th><th>Cut instructions</th><th class="num">Line total</th></tr></thead>
+      <tbody>
+        ${o.items.map((it) => `<tr>
+          <td class="primary">${esc(it.product_name)}</td>
+          <td data-label="Qty" class="num">${qty(it)}</td>
+          <td data-label="Price" class="num">${money(it.unit_price_cents)}/${it.unit}</td>
+          <td data-label="Cut" class="${it.cut_instructions ? 'cut-note' : 'hide-mobile'}">${esc(it.cut_instructions) || '<span class="muted">—</span>'}</td>
+          <td data-label="Line total" class="num">${money(it.line_total_cents)}</td>
+        </tr>`).join('')}
+      </tbody>
+    </table>
+    <div class="order-total"><span>Estimated total</span><b>${money(o.total_cents)}</b></div>
+  </div>`;
+}
+
+let currentCustomer = null;
+async function loadCustomer(id, { quiet = false } = {}) {
+  show('customer');
+  if (!quiet || currentCustomer !== id) {
+    $('#customer-head').innerHTML = 'Loading…';
+    $('#customer-orders').innerHTML = '';
+  }
+  currentCustomer = id;
+  let c;
+  try { c = await api(`/api/admin/customers/${id}`); }
+  catch (err) { if (!(err instanceof AuthError)) $('#customer-head').textContent = err.message; return; }
+  const spent = c.orders.filter((o) => o.status !== 'cancelled').reduce((s, o) => s + o.total_cents, 0);
+  const open = c.orders.filter((o) => ['new', 'preparing', 'ready'].includes(o.status)).length;
+  $('#customer-head').innerHTML = `
+    <h2>${esc(c.name)}</h2>
+    <div class="contact-actions">
+      <a class="btn secondary" href="tel:${esc(c.phone)}">📞 ${esc(c.phone)}</a>
+      <a class="btn secondary" href="sms:${esc(c.phone)}">💬 Text</a>
+      <a class="btn secondary" href="mailto:${esc(c.email)}">✉️ ${esc(c.email)}</a>
+    </div>
+    <p class="muted">Customer since ${when(c.created_at)}</p>
+    <div class="stats">
+      <div class="stat"><div class="v">${c.orders.length}</div><div class="l">Orders</div></div>
+      <div class="stat"><div class="v">${open}</div><div class="l">Open</div></div>
+      <div class="stat"><div class="v">${money(spent)}</div><div class="l">Total spent</div></div>
+    </div>`;
+  $('#customer-orders').innerHTML = c.orders.length ? c.orders.map(renderOrder).join('') : '<p class="muted">No orders.</p>';
+}
+
+document.addEventListener('change', async (e) => {
+  if (!e.target.matches('select.status')) return;
+  const sel = e.target;
+  sel.disabled = true;
+  try {
+    const o = await api(`/api/admin/orders/${sel.dataset.order}`, {
+      method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ status: sel.value }),
+    });
+    const b = sel.closest('.order, tr')?.querySelector('.badge');
+    if (b) b.outerHTML = badge(o.status);
+  } catch (err) { if (!(err instanceof AuthError)) alert(`Could not update: ${err.message}`); }
+  finally { sel.disabled = false; }
+});
+
+$('#back').addEventListener('click', () => { location.hash = ''; });
+
+// ----- All orders -----
+$('#status-filter').innerHTML += Object.entries(STATUSES).map(([k, v]) => `<option value="${k}">${v}</option>`).join('');
+async function loadOrders() {
+  const list = await api(`/api/admin/orders?status=${$('#status-filter').value}`);
+  $('#orders-empty').classList.toggle('hidden', list.length > 0);
+  $('#orders-body').innerHTML = list.map((o) => `
+    <tr>
+      <td class="primary"><b>#${o.id}</b> · <a href="#customer/${o.customer_id}">${esc(o.customer_name)}</a> ${badge(o.status)}</td>
+      <td data-label="Placed">${when(o.created_at)}</td>
+      <td data-label="Customer" class="hide-mobile"><a href="#customer/${o.customer_id}">${esc(o.customer_name)}</a><br><span class="muted">${esc(o.customer_phone)}</span></td>
+      <td data-label="For">${o.fulfillment === 'delivery' ? 'Delivery' : 'Pickup'} · ${day(o.pickup_date)}</td>
+      <td data-label="Items" class="num">${o.item_count}</td>
+      <td data-label="Total" class="num">${money(o.total_cents)}</td>
+      <td data-label="Status">${statusSelect(o)}</td>
+    </tr>`).join('');
+}
+$('#status-filter').addEventListener('change', loadOrders);
+
+// ----- Routing & refresh -----
+document.querySelectorAll('.tabs button').forEach((b) => b.addEventListener('click', () => {
+  location.hash = b.dataset.view === 'orders' ? 'orders' : '';
+}));
+function route({ quiet = false } = {}) {
+  const h = location.hash.slice(1);
+  const m = h.match(/^customer\/(\d+)$/);
+  const run = m ? () => loadCustomer(m[1], { quiet })
+    : h === 'orders' ? () => { show('orders'); return loadOrders(); }
+    : () => { show('customers'); return loadCustomers(); };
+  return Promise.resolve(run()).catch((err) => { if (!(err instanceof AuthError)) console.error(err); });
+}
+window.addEventListener('hashchange', () => route());
+$('#refresh').addEventListener('click', () => route({ quiet: true }));
+
+// Keep the list fresh while the app is open, and when it's brought back to the foreground.
+const loggedIn = () => !$('#app').classList.contains('hidden');
+const editing = () => document.activeElement?.matches('select.status, input');
+setInterval(() => { if (loggedIn() && !document.hidden && !editing()) route({ quiet: true }); }, 60000);
+document.addEventListener('visibilitychange', () => { if (!document.hidden && loggedIn()) route({ quiet: true }); });
+
+fetch('/api/admin/session').then((r) => {
+  if (r.ok) { showApp(); route(); } else showLogin();
+}).catch(() => {
+  $('#view-login').classList.remove('hidden');
+  $('#login-error').textContent = "You're offline. Connect to the internet to see orders.";
+  $('#login-error').classList.remove('hidden');
+});
+</script>
+</body>
+</html>
