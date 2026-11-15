@@ -65,8 +65,14 @@ const isoDay = (offset) => {
 };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
+const deck = [];
+function nextPerson() {
+  if (!deck.length) deck.push(...[...PEOPLE].sort(() => Math.random() - 0.5));
+  return deck.pop();
+}
+
 function makeOrder(products) {
-  const [name, email, phone] = pick(PEOPLE);
+  const [name, email, phone] = nextPerson();
   const chosen = new Map();
   const n = between(1, 4);
   while (chosen.size < n) {

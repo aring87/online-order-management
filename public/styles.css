@@ -457,3 +457,8 @@ table.gtable.flat tr:last-child td { border-bottom: 1px solid var(--border); }
 @media print {
   .pl .browse table.gtable { table-layout: fixed; }
 }
+
+.stripe-status.demo { background: #fff4d6; color: #5c4300; }
+.stripe-status.demo code { background: rgba(0,0,0,.06); padding: 1px 5px; border-radius: 4px; }
+
+.t-notes, .g-note, .notes { white-space: pre-line; }

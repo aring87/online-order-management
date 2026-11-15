@@ -125,9 +125,10 @@ function sessionToOrder(session, lineItems) {
 }
 
 // ---------- Talking to Stripe ----------
-function createStripe({ db, secretKey, webhookSecret, apiBase = 'https://api.stripe.com', onOrder = () => {}, log = console }) {
+// demo: true when webhookSecret is the local demo secret (no real Stripe connected) — see scripts/demo-stripe-orders.js
+function createStripe({ db, secretKey, webhookSecret, demo = false, apiBase = 'https://api.stripe.com', onOrder = () => {}, log = console }) {
   const enabled = Boolean(secretKey);
-  const status = { enabled, webhook: Boolean(webhookSecret), lastSyncAt: null, lastError: null, imported: 0 };
+  const status = { enabled, webhook: Boolean(webhookSecret) && !demo, demo, lastSyncAt: null, lastError: null, imported: 0 };
   let timer = null;
   let running = null;
 

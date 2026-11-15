@@ -102,6 +102,12 @@ To make a fresh copy with dates around today, run `npm run sample-data`.
 - **Options:** `node scripts/demo-online-orders.js --count 20 --now 5 --every 10`
 - **Stopping:** press Ctrl+C.
 
+**Fake paid Stripe orders (demo, no Stripe account needed).** With the program open on **Online orders**, double-click **`demo-stripe-orders.bat`** (or run `npm run demo-stripe-orders`).
+- **What it does:** it pretends to be Stripe telling the program "a customer just paid", sending the same signed message Stripe sends for a Payment Link payment. The program handles it with the same code it will use for real Stripe orders.
+- **What you see:** orders arrive marked **💳 Paid**, with the pickup date and time and the cutting instructions the "customer" typed at checkout.
+- **Marked as fake:** each one says "DEMO" in its notes.
+- **When it works:** only while no real Stripe key is set up. Restart the program once after updating so the demo is ready. It switches off automatically once you add a real key.
+
 To start over with an empty program, close the program and delete the `data` folder. **Don't do this once real orders are in it.**
 
 ## Backing up

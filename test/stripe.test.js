@@ -188,3 +188,26 @@ test('signature check', () => {
   assert.ok(!verifySignature(body, 'garbage', WHSEC));
   assert.ok(!verifySignature(body, sign(body), ''));
 });
+
+test('demo mode: fake signed Stripe notices become paid orders without any Stripe key', () =>
+  withServer({ webhookSecret: 'whsec_demo_x', demo: true }, async (req) => {
+    const { data: st } = await req('/api/admin/stripe');
+    assert.equal(st.enabled, false);
+    assert.equal(st.demo, true);
+    assert.equal(st.webhook, false, 'demo is not reported as a real webhook');
+
+    const session = paidSession('cs_test_demo1', { line_items: { object: 'list', data: LINE_ITEMS, has_more: false },
+      metadata: { Note: 'DEMO - fake Stripe test payment' } });
+    const body = JSON.stringify({ type: 'checkout.session.completed', data: { object: session } });
+    const res = await fetch(req.base + '/api/stripe/webhook', {
+      method: 'POST', headers: { 'Content-Type': 'application/json', 'Stripe-Signature': sign(body, 'whsec_demo_x') }, body,
+    });
+    assert.equal(res.status, 200);
+    const { data: online } = await req('/api/admin/online');
+    assert.equal(online.length, 1);
+    assert.equal(online[0].payment_status, 'paid');
+    assert.match(online[0].notes, /DEMO/);
+    assert.equal(online[0].items.length, 2, 'items taken from the notice, no Stripe API needed');
+    const { data: st2 } = await req('/api/admin/stripe');
+    assert.equal(st2.imported, 1);
+  }));

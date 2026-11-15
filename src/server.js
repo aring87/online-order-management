@@ -25,13 +25,26 @@ function sessionSecret() {
   return secret;
 }
 
+// Stripe DEMO: with no real Stripe settings, a local secret lets scripts/demo-stripe-orders.js send fake
+// "customer paid" notices through the real Stripe webhook code. Off as soon as real Stripe is set up.
+function stripeDemoSecret() {
+  if (process.env.STRIPE_SECRET_KEY || process.env.STRIPE_WEBHOOK_SECRET || process.env.STRIPE_DEMO === '0') return '';
+  const file = path.join(path.dirname(DB_FILE), '.stripe-demo-secret');
+  try { return fs.readFileSync(file, 'utf8').trim(); } catch { /* create it */ }
+  const secret = `whsec_demo_${crypto.randomBytes(24).toString('hex')}`;
+  try { fs.mkdirSync(path.dirname(file), { recursive: true }); fs.writeFileSync(file, secret, { mode: 0o600 }); } catch { return ''; }
+  return secret;
+}
+const demoSecret = stripeDemoSecret();
+
 const db = openDb(DB_FILE);
 const app = createApp(db, {
   adminPassword: ADMIN_PASSWORD,
   sessionSecret: sessionSecret(),
   stripe: {
     secretKey: process.env.STRIPE_SECRET_KEY || '',
-    webhookSecret: process.env.STRIPE_WEBHOOK_SECRET || '',
+    webhookSecret: process.env.STRIPE_WEBHOOK_SECRET || demoSecret,
+    demo: Boolean(demoSecret),
     ...(process.env.STRIPE_API_BASE ? { apiBase: process.env.STRIPE_API_BASE } : {}),  // for testing only
   },
 });
