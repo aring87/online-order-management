@@ -761,9 +761,11 @@ document.addEventListener('click', async (e) => {
 async function loadStripeStatus() {
   const st = await api('/api/admin/stripe');
   const box = $('#stripe-status');
-  if (!st.enabled && st.demo && st.imported) {
+  if (!st.enabled && st.demo) {
     box.className = 'stripe-status demo';
-    box.innerHTML = `<b>💳 Stripe DEMO</b> — the paid orders below marked DEMO are fake, sent by <code>demo-stripe-orders.bat</code>. Add a real Stripe key to the <code>.env</code> file to go live.`;
+    box.innerHTML = `<b>💳 Stripe demo mode</b> — no real Stripe account is connected yet. To see fake <b>paid</b> orders arrive,
+      double-click <code>demo-stripe-orders.bat</code> in the program folder. Paid orders marked "DEMO" are fake.
+      Add a real Stripe key to the <code>.env</code> file to go live.`;
     return;
   }
   if (!st.enabled) {
