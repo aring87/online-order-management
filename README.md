@@ -105,7 +105,7 @@ Once connected, every **paid** Stripe order (Checkout or Payment Links) appears 
 
 **Step 1: Give the program a read-only Stripe key.** This works on the shop computer as-is, and new paid orders appear within a minute.
 1. In Stripe, go to **Developers → API keys → Create restricted key**.
-2. Name it "Orders program". Set **Checkout Sessions** and **Products** to **Read**, and leave everything else as None. Create the key.
+2. Name it "Orders program". Set **Checkout Sessions: Write**, **Refunds: Write**, and **PaymentIntents** and **Products** to **Read**. Leave everything else as None. Create the key. The write permissions are only used when you click Refund or Payment link after weighing.
 3. Open the `.env` file and add the key on its own line: `STRIPE_SECRET_KEY=rk_live_...`. Never send this key by email or chat.
 4. Restart the program. The Online orders tab will say **Stripe connected**.
 
@@ -149,6 +149,26 @@ To make a fresh copy with dates around today, run `npm run sample-data`.
 - **When it works:** only while no real Stripe key is set up. Restart the program once after updating so the demo is ready. It switches off automatically once you add a real key.
 
 To start over with an empty program, close the program and delete the `data` folder. **Don't do this once real orders are in it.**
+
+## Weighed pricing: refunds and extra charges
+
+Customers pay for an **estimated weight**. Once each by-the-pound item is cut, type its **actual weight** into the ⚖ box under the item on the **prep board** ticket. The program reprices it at the same price per lb (4.25 lb of ribeye at $24.99/lb = $106.21) and shows the difference for the whole order:
+
+- **Weighed less, and paid online:** *"Refund $2.10"*.
+  - **↩ Refund:** sends a partial refund to the customer's card through Stripe.
+  - **Refunded in Stripe:** use this if you refunded it yourself in the Stripe or shop dashboard.
+  - **No refund:** closes the difference without refunding.
+- **Weighed more, and paid online:** *"Customer owes $1.25 more"*.
+  - **💳 Payment link:** creates a secure Stripe payment page for exactly the difference and copies the link, so you can text or email it. When the customer pays, the order updates by itself (within a minute).
+  - **Collected at pickup:** use this if they pay the difference at the counter.
+  - **Waive:** for small amounts you don't want to chase.
+- **Paid at pickup** (not online): shows the weighed total to charge at the counter.
+
+Every refund or charge needs a click and a confirmation. Nothing is charged or refunded automatically. Printed tickets have an **Actual ____ lb** column for writing weights by hand at the scale.
+
+**Stripe can't take extra money from a card after the payment is done**, so the customer must approve the extra amount through the link (or pay at pickup). Refunds go straight back to the card. Refunds from the program only work for payments made through the Stripe account the key belongs to. For payments taken by another shop system, refund there and click **Refunded in Stripe**.
+
+**The Stripe key** needs: **Checkout Sessions: Write**, **Refunds: Write**, **PaymentIntents: Read**, **Products: Read**. See `.env.example`. With no key set (demo mode), refunds and links are simulated and marked DEMO.
 
 ## Backing up
 

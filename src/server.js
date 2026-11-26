@@ -58,6 +58,8 @@ const app = createApp(db, {
     secretKey: process.env.STRIPE_SECRET_KEY || '',
     webhookSecret: process.env.STRIPE_WEBHOOK_SECRET || demoSecret,
     demo: Boolean(demoSecret),
+    // Where customers land after paying an extra-weight link (e.g. your website).
+    successUrl: process.env.STRIPE_SUCCESS_URL || 'https://stripe.com',
     ...(process.env.STRIPE_API_BASE ? { apiBase: process.env.STRIPE_API_BASE } : {}),  // for testing only
   },
   pickup: {

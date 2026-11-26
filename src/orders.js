@@ -2,6 +2,7 @@
 
 const { phoneKey, nameKey } = require('./db');
 const { assignSlotNumber } = require('./slots');
+const { weighSummary } = require('./weigh');
 
 /**
  * Find the customer this order belongs to, or create them.
@@ -85,7 +86,7 @@ function getOrderWithItems(db, orderId) {
     FROM orders o JOIN customers c ON c.id = o.customer_id WHERE o.id = ?`).get(orderId);
   if (!order) return null;
   order.items = db.prepare('SELECT * FROM order_items WHERE order_id = ? ORDER BY id').all(orderId);
-  return order;
+  return weighSummary(db, order);
 }
 
 /** Orders with their items, for the prep board and online-orders tab. */
@@ -99,6 +100,7 @@ function listOrdersWithItems(db, where, params = [], orderBy = 'o.created_at DES
     .all(...orders.map((o) => o.id));
   const byOrder = new Map(orders.map((o) => [o.id, Object.assign(o, { items: [] })]));
   for (const it of items) byOrder.get(it.order_id).items.push(it);
+  for (const o of orders) weighSummary(db, o);
   return orders;
 }
 

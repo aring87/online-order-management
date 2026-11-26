@@ -126,7 +126,18 @@ function sessionToOrder(session, lineItems) {
 
 // ---------- Talking to Stripe ----------
 // demo: true when webhookSecret is the local demo secret (no real Stripe connected) — see scripts/demo-stripe-orders.js
-function createStripe({ db, secretKey, webhookSecret, demo = false, apiBase = 'https://api.stripe.com', onOrder = () => {}, log = console }) {
+// Stripe wants form-encoded bodies with nested keys: line_items[0][price_data][currency]=usd
+function formEncode(obj, prefix = '', out = new URLSearchParams()) {
+  for (const [k, v] of Object.entries(obj)) {
+    if (v == null) continue;
+    const key = prefix ? `${prefix}[${k}]` : k;
+    if (typeof v === 'object') formEncode(v, key, out); else out.append(key, String(v));
+  }
+  return out;
+}
+
+function createStripe({ db, secretKey, webhookSecret, demo = false, apiBase = 'https://api.stripe.com', onOrder = () => {},
+  onAdjustmentPaid = () => {}, successUrl = 'https://stripe.com', log = console }) {
   const enabled = Boolean(secretKey);
   const status = { enabled, webhook: Boolean(webhookSecret) && !demo, demo, lastSyncAt: null, lastError: null, imported: 0 };
   let timer = null;
@@ -146,6 +157,44 @@ function createStripe({ db, secretKey, webhookSecret, demo = false, apiBase = 'h
     return body;
   }
 
+  async function apiPost(path, body, idempotencyKey) {
+    const res = await fetch(new URL(path, apiBase), {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${secretKey}`, 'Stripe-Version': '2024-06-20',
+        'Content-Type': 'application/x-www-form-urlencoded',
+        ...(idempotencyKey ? { 'Idempotency-Key': idempotencyKey } : {}),
+      },
+      body: formEncode(body),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      const msg = data.error?.message || `Stripe returned ${res.status}`;
+      throw new Error(res.status === 401 || res.status === 403
+        ? `Stripe refused (${msg}). The key in .env may need permission for Refunds and Checkout Sessions (write).` : msg);
+    }
+    return data;
+  }
+
+  /** Partial refund of a payment. idempotencyKey stops a double click refunding twice. */
+  function refund(paymentIntent, amountCents, idempotencyKey) {
+    return apiPost('/v1/refunds', { payment_intent: paymentIntent, amount: amountCents, reason: 'requested_by_customer',
+      metadata: { kind: 'weight_adjustment' } }, idempotencyKey);
+  }
+
+  /** A secure Stripe checkout page for the extra amount owed after weighing. */
+  function chargeLink({ orderId, label, amountCents, email, idempotencyKey }) {
+    return apiPost('/v1/checkout/sessions', {
+      mode: 'payment',
+      success_url: successUrl,
+      customer_email: email || undefined,
+      line_items: [{ quantity: 1, price_data: { currency: 'usd', unit_amount: amountCents,
+        product_data: { name: label, description: 'Difference after your order was weighed' } } }],
+      metadata: { kind: 'weight_adjustment', order_id: orderId },
+      payment_intent_data: { metadata: { kind: 'weight_adjustment', order_id: orderId } },
+    }, idempotencyKey);
+  }
+
   async function lineItemsFor(sessionId) {
     const items = [];
     let starting_after;
@@ -163,6 +212,12 @@ function createStripe({ db, secretKey, webhookSecret, demo = false, apiBase = 'h
   async function ingestSession(session) {
     if (session.object !== 'checkout.session' || session.status === 'expired') return null;
     if (!PAID.has(session.payment_status)) return null;           // e.g. bank transfer still pending
+    // A paid weight-adjustment link is not a new order: mark that adjustment as paid.
+    if (session.metadata?.kind === 'weight_adjustment') {
+      const r = db.prepare("UPDATE adjustments SET status = 'done' WHERE stripe_id = ? AND status = 'pending'").run(session.id);
+      if (r.changes) onAdjustmentPaid({ order_id: Number(session.metadata.order_id), amount_cents: session.amount_total });
+      return null;
+    }
     const key = `stripe:${session.id}`;
     if (db.prepare('SELECT 1 FROM orders WHERE import_key = ?').get(key)) return null;
 
@@ -243,7 +298,7 @@ function createStripe({ db, secretKey, webhookSecret, demo = false, apiBase = 'h
     res.json({ received: true });
   }
 
-  return { status, sync, start, stop, webhook, ingestSession };
+  return { status, sync, start, stop, webhook, ingestSession, refund, chargeLink };
 }
 
 module.exports = { createStripe, verifySignature, sessionToOrder, parseTime, pickupDate };

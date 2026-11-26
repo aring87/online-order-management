@@ -151,6 +151,23 @@ function openDb(file) {
   ensureColumn(db, 'order_items', 'packed', 'INTEGER NOT NULL DEFAULT 0');
   ensureColumn(db, 'orders', 'payment_status', 'TEXT');
   ensureColumn(db, 'orders', 'slot_number', 'INTEGER');
+  // Weighing: the actual weight/quantity once cut, and the price at that weight.
+  ensureColumn(db, 'order_items', 'actual_quantity', 'REAL');
+  ensureColumn(db, 'order_items', 'actual_line_total_cents', 'INTEGER');
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS adjustments (
+      id           INTEGER PRIMARY KEY AUTOINCREMENT,
+      order_id     INTEGER NOT NULL REFERENCES orders(id) ON DELETE CASCADE,
+      kind         TEXT NOT NULL CHECK (kind IN ('refund', 'charge', 'collected', 'waive')),
+      amount_cents INTEGER NOT NULL,
+      status       TEXT NOT NULL DEFAULT 'done' CHECK (status IN ('done', 'pending', 'failed')),
+      demo         INTEGER NOT NULL DEFAULT 0,
+      stripe_id    TEXT,
+      url          TEXT,
+      note         TEXT,
+      created_at   TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_adjustments_order ON adjustments(order_id);`);
   db.exec('CREATE INDEX IF NOT EXISTS idx_orders_slot ON orders(pickup_date, slot_number)');
 
   const { n } = db.prepare('SELECT COUNT(*) AS n FROM products').get();

@@ -531,3 +531,21 @@ tr.slot-row td { background: #f1ebe5; font-weight: 700; font-size: .88rem; paddi
 
 .date-note { color: var(--accent-dark); font-weight: 600; font-size: .9rem; margin: 6px 0 0; }
 .slot-closed { grid-column: 1 / -1; background: #f4efe9; border-radius: 10px; padding: 14px 16px; font-weight: 600; color: var(--muted); }
+
+/* ---------- Weighing ---------- */
+.weigh-row { display: flex; align-items: center; gap: 6px; padding: 0 2px 8px 32px; font-size: .88rem; color: var(--muted); flex-wrap: wrap; }
+.weigh-row .w-in { width: 84px; padding: 5px 8px; font-weight: 700; color: var(--text); }
+.w-price { color: var(--text); font-weight: 600; }
+.w-up { color: var(--accent); }
+.w-down { color: #22663a; }
+.w-actual { font-size: .8rem; color: #22663a; font-weight: 700; }
+.weigh-bar { background: #f6f1ec; border-radius: 8px; padding: 8px 10px; margin: 8px 0 4px; font-size: .9rem; }
+.wb-sum { margin-bottom: 4px; }
+.wb-line { font-weight: 600; margin: 2px 0 6px; }
+.wb-owe { color: var(--accent-dark); }
+.wb-refund { color: #22663a; }
+.wb-ok { color: #22663a; }
+.wb-btns { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+.wb-hist { list-style: none; margin: 6px 0 0; padding: 0; font-size: .82rem; color: var(--muted); }
+@media print { .pt-actual { white-space: nowrap; font-size: 13pt; } }
+@media print { #print-area .pt p { white-space: pre-line; } }

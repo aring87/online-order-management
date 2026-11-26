@@ -220,7 +220,7 @@ function renderOrder(o) {
       <tbody>
         ${o.items.map((it) => `<tr>
           <td class="primary">${esc(it.product_name)}</td>
-          <td data-label="Qty" class="num">${qty(it)}</td>
+          <td data-label="Qty" class="num">${qty(it)}${it.actual_quantity != null ? `<div class="w-actual">⚖ ${it.actual_quantity}${it.unit === 'lb' ? ' lb' : ''}</div>` : ''}</td>
           <td data-label="Price" class="num">${money(it.unit_price_cents)}${it.unit === 'lb' ? '/lb' : ''}</td>
           <td data-label="Cut" class="${it.cut_instructions ? 'cut-note' : 'hide-mobile'}">${esc(it.cut_instructions) || '<span class="muted">—</span>'}</td>
           <td data-label="Total" class="num">${money(it.line_total_cents)}</td>
@@ -228,6 +228,7 @@ function renderOrder(o) {
       </tbody>
     </table>
     <div class="order-total"><span>Order total</span><b>${money(o.total_cents)}</b></div>
+    ${weighBar(o)}
   </div>`;
 }
 
@@ -968,7 +969,49 @@ function itemLine(it, { checkable = false } = {}) {
   return `<li class="${it.packed ? 'packed' : ''}"><label>${box}
     <span class="q">${esc(qty(it))}</span>
     <span class="i">${esc(it.product_name)}${it.cut_instructions ? `<span class="cut">✂ ${esc(it.cut_instructions)}</span>` : ''}</span>
-  </label></li>`;
+  </label>${checkable && it.unit === 'lb' ? weighInput(it) : ''}</li>`;
+}
+
+// ⚖ Actual weight box for a by-the-pound item, with the repriced line.
+function weighInput(it) {
+  const diff = it.actual_line_total_cents != null ? it.actual_line_total_cents - it.line_total_cents : null;
+  return `<div class="weigh-row">⚖ <input type="number" class="w-in" data-weigh="${it.id}" min="0" step="0.01" inputmode="decimal"
+      value="${it.actual_quantity ?? ''}" placeholder="actual" aria-label="Actual weight of ${esc(it.product_name)} in lb"> lb
+    ${diff != null ? `<span class="w-price">${money(it.actual_line_total_cents)} <span class="${diff > 0 ? 'w-up' : diff < 0 ? 'w-down' : ''}">(${diff >= 0 ? '+' : '−'}${money(Math.abs(diff))})</span></span>` : ''}
+  </div>`;
+}
+
+// What's left to settle after weighing, with the buttons to do it.
+function weighBar(o) {
+  const w = o.weigh;
+  if (!w || (!w.items_weighed && !w.adjustments.length)) return '';
+  const amt = money(Math.abs(w.outstanding_cents));
+  const head = `<div class="wb-sum">Estimated ${money(w.estimated_cents)} → weighed <b>${money(w.actual_cents)}</b>
+    ${w.items_to_weigh && !w.all_weighed ? `<span class="muted">(${w.items_weighed}/${w.items_to_weigh} weighed)</span>` : ''}</div>`;
+  let body = '';
+  if (!w.paid_online) {
+    body = `<div class="wb-line">💵 Charge <b>${money(w.actual_cents)}</b> at pickup</div>`;
+  } else if (w.pending_link) {
+    body = `<div class="wb-line wb-owe">Waiting for the customer to pay <b>${money(w.pending_link.amount_cents)}</b>${w.pending_link.demo ? ' (DEMO)' : ''}</div>
+      <div class="wb-btns"><button type="button" class="small secondary" data-copy="${esc(w.pending_link.url)}">📋 Copy payment link</button>
+      <button type="button" class="small secondary" data-settle="mark_paid" data-adj="${w.pending_link.id}" data-order="${o.id}">✓ Paid</button></div>`;
+  } else if (w.outstanding_cents > 0) {
+    body = `<div class="wb-line wb-owe">Customer owes <b>${amt}</b> more</div>
+      <div class="wb-btns"><button type="button" class="small" data-settle="charge_link" data-order="${o.id}" data-amt="${amt}">💳 Payment link ${amt}</button>
+      <button type="button" class="small secondary" data-settle="collected" data-order="${o.id}" data-amt="${amt}">Collected at pickup</button>
+      <button type="button" class="small link" data-settle="waive" data-order="${o.id}" data-amt="${amt}">Waive</button></div>`;
+  } else if (w.outstanding_cents < 0) {
+    body = `<div class="wb-line wb-refund">Refund <b>${amt}</b> to the customer</div>
+      <div class="wb-btns"><button type="button" class="small" data-settle="refund" data-order="${o.id}" data-amt="${amt}">↩ Refund ${amt}${w.can_refund_in_stripe ? '' : ''}</button>
+      <button type="button" class="small secondary" data-settle="refunded_manually" data-order="${o.id}" data-amt="${amt}">Refunded in Stripe</button>
+      <button type="button" class="small link" data-settle="waive" data-order="${o.id}" data-amt="${amt}">No refund</button></div>`;
+  } else if (w.all_weighed || w.adjustments.length) {
+    body = '<div class="wb-line wb-ok">✓ Settled</div>';
+  }
+  const hist = w.adjustments.filter((a) => a.status === 'done').map((a) => `<li>${{
+    refund: `↩ Refunded ${money(a.amount_cents)}`, charge: `💳 Paid ${money(a.amount_cents)} by link`,
+    collected: `💵 Collected ${money(a.amount_cents)}`, waive: `Waived ${money(a.amount_cents)}` }[a.kind]}${a.demo ? ' (DEMO)' : ''}</li>`).join('');
+  return `<div class="weigh-bar">${head}${body}${hist ? `<ul class="wb-hist">${hist}</ul>` : ''}</div>`;
 }
 
 function ticketCard(o, { online = false } = {}) {
@@ -991,6 +1034,7 @@ function ticketCard(o, { online = false } = {}) {
     <ul class="checklist">${o.items.map((it) => itemLine(it, { checkable: !online })).join('')}</ul>
     ${o.notes ? `<p class="t-notes">📝 ${esc(o.notes)}</p>` : ''}
     ${o.delivery_address ? `<p class="t-notes">🚚 ${esc(o.delivery_address)}</p>` : ''}
+    ${online ? '' : weighBar(o)}
     <footer>
       ${online
         ? `<span class="muted">${o.items.length} item${o.items.length === 1 ? '' : 's'} · ${money(o.total_cents)}</span>`
@@ -1121,6 +1165,53 @@ $('#copy-link').addEventListener('click', async () => {
   setTimeout(() => { $('#copy-link').textContent = 'Copy link'; }, 2000);
 });
 
+// ================= Weighing =================
+function updateOrderEverywhere(o) {
+  const i = boardOrders.findIndex((x) => x.id === o.id);
+  if (i >= 0) { boardOrders[i] = o; renderBoard(); }
+  const j = browseOrders.findIndex((x) => x.id === o.id);
+  if (j >= 0) { browseOrders[j] = o; renderBrowse(); }
+  if (location.hash.startsWith('#customer/')) route({ quiet: true });
+}
+document.addEventListener('change', async (e) => {
+  const input = e.target.closest('input[data-weigh]');
+  if (!input) return;
+  input.disabled = true;
+  try {
+    const o = await api(`/api/admin/items/${input.dataset.weigh}/weight`, jsonOpts('PATCH', { actual: input.value === '' ? null : Number(input.value) }));
+    updateOrderEverywhere(o);
+  } catch (err) { if (!(err instanceof AuthError)) alert(`Could not save the weight: ${err.message}`); input.disabled = false; }
+});
+document.addEventListener('click', async (e) => {
+  const copy = e.target.closest('[data-copy]');
+  if (copy) {
+    try { await navigator.clipboard.writeText(copy.dataset.copy); copy.textContent = '✓ Copied — text or email it'; }
+    catch { prompt('Copy this payment link and send it to the customer:', copy.dataset.copy); }
+    return;
+  }
+  const b = e.target.closest('[data-settle]');
+  if (!b) return;
+  const action = b.dataset.settle;
+  const ask = {
+    refund: `Refund ${b.dataset.amt} to the customer's card through Stripe?`,
+    charge_link: `Create a Stripe payment link for ${b.dataset.amt}? You can then copy it and send it to the customer.`,
+    collected: `Mark ${b.dataset.amt} as collected at pickup?`,
+    waive: `Waive ${b.dataset.amt}? Nothing will be charged or refunded.`,
+    refunded_manually: `Did you already refund ${b.dataset.amt} in Stripe or the shop dashboard?`,
+    mark_paid: 'Has the customer paid the extra amount?',
+  }[action];
+  if (ask && !confirm(ask)) return;
+  b.disabled = true;
+  try {
+    const o = await api(`/api/admin/orders/${b.dataset.order}/settle`, jsonOpts('POST', { action, adjustment_id: b.dataset.adj }));
+    updateOrderEverywhere(o);
+    if (action === 'charge_link' && o.weigh.pending_link) {
+      try { await navigator.clipboard.writeText(o.weigh.pending_link.url); } catch { /* shown below */ }
+      prompt('Payment link created (copied). Send it to the customer by text or email:', o.weigh.pending_link.url);
+    }
+  } catch (err) { if (!(err instanceof AuthError)) alert(err.message); b.disabled = false; }
+});
+
 // ================= Printing tickets =================
 async function printTicket(id) {
   let o;
@@ -1138,13 +1229,14 @@ async function printTicket(id) {
         </div>
       </div>
       <table class="pt-items">
-        <thead><tr><th></th><th>Qty</th><th>Item</th><th>Cut / instructions</th></tr></thead>
-        <tbody>${o.items.map((it) => `<tr><td class="pt-box">☐</td><td class="pt-q">${esc(qty(it))}</td><td>${esc(it.product_name)}</td><td>${esc(it.cut_instructions || '')}</td></tr>`).join('')}</tbody>
+        <thead><tr><th></th><th>Qty</th><th>Item</th><th>Cut / instructions</th><th>Actual</th></tr></thead>
+        <tbody>${o.items.map((it) => `<tr><td class="pt-box">☐</td><td class="pt-q">${esc(qty(it))}</td><td>${esc(it.product_name)}</td><td>${esc(it.cut_instructions || '')}</td>
+          <td class="pt-actual">${it.unit === 'lb' ? (it.actual_quantity != null ? `<b>${it.actual_quantity} lb</b>` : '______ lb') : ''}</td></tr>`).join('')}</tbody>
       </table>
       ${o.notes ? `<p><b>Notes:</b> ${esc(o.notes)}</p>` : ''}
       ${o.delivery_address ? `<p><b>Deliver to:</b> ${esc(o.delivery_address)}</p>` : ''}
       <div class="pt-foot">
-        <span>${o.items.length} item${o.items.length === 1 ? '' : 's'} · ${o.payment_status === 'paid' ? 'paid' : 'est.'} ${money(o.total_cents)}</span>
+        <span>${o.items.length} item${o.items.length === 1 ? '' : 's'} · ${o.payment_status === 'paid' ? 'paid' : 'est.'} ${money(o.total_cents)}${o.weigh?.items_weighed ? ` · weighed ${money(o.weigh.actual_cents)}` : ''}</span>
         <span>${o.slot_number != null ? `Order ${o.id} · ` : ''}Ordered ${when(o.created_at)}</span>
       </div>
     </div>`;

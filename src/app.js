@@ -9,6 +9,7 @@ const { findOrCreateCustomer, insertOrder, getOrderWithItems, listOrdersWithItem
 const { readSpreadsheet, importRows, FIELDS, ImportError } = require('./importer');
 const { createStripe } = require('./stripe');
 const { itemTotals } = require('./reports');
+const { setActualWeight } = require('./weigh');
 const { slotsFor, slotCount, configure: configureSlots, assignSlotNumber, backfillSlotNumbers, pickupProblem } = require('./slots');
 
 // The shop's week (Sunday first): closed Monday, Sunday until 3 PM, otherwise the general hours.
@@ -216,7 +217,8 @@ function createApp(db, {
 
   // Paid Stripe orders flow in as online orders (see src/stripe.js).
   const pickupNumber = (id) => db.prepare('SELECT slot_number, pickup_date FROM orders WHERE id = ?').get(id) || {};
-  const stripe = createStripe({ db, ...stripeOpts, onOrder: (e) => changed('online-order', { ...e, ...pickupNumber(e.id) }) });
+  const stripe = createStripe({ db, ...stripeOpts, onOrder: (e) => changed('online-order', { ...e, ...pickupNumber(e.id) }),
+    onAdjustmentPaid: (e) => changed('order', { id: e.order_id }) });
   app.locals.stripe = stripe;
   app.post('/api/stripe/webhook', express.raw({ type: () => true, limit: '1mb' }), stripe.webhook);
 
@@ -455,6 +457,77 @@ function createApp(db, {
     if (packed) db.prepare("UPDATE orders SET status = 'preparing' WHERE id = ? AND status = 'new'").run(item.order_id);
     changed('order', { id: item.order_id });
     res.json(getOrderWithItems(db, item.order_id));
+  });
+
+  // ---------- Weighing & settling the difference ----------
+  app.patch('/api/admin/items/:id/weight', (req, res) => {
+    let orderId;
+    try { orderId = setActualWeight(db, Number(req.params.id), req.body?.actual); }
+    catch (err) { return res.status(400).json({ error: err.message }); }
+    if (!orderId) return res.status(404).json({ error: 'Item not found' });
+    changed('order', { id: orderId });
+    res.json(getOrderWithItems(db, orderId));
+  });
+
+  // action: refund | charge_link | collected | waive | refunded_manually | mark_paid (adjustment_id)
+  app.post('/api/admin/orders/:id/settle', async (req, res) => {
+    const id = Number(req.params.id);
+    const order = getOrderWithItems(db, id);
+    if (!order) return res.status(404).json({ error: 'Order not found' });
+    const { action, adjustment_id: adjId } = req.body || {};
+    const owed = order.weigh.outstanding_cents;            // + customer owes us, − we owe the customer
+    const add = (kind, amount, extra = {}) => db.prepare(`
+      INSERT INTO adjustments (order_id, kind, amount_cents, status, demo, stripe_id, url, note) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`)
+      .run(id, kind, amount, extra.status || 'done', extra.demo ? 1 : 0, extra.stripe_id || null, extra.url || null, extra.note || null);
+    const demo = !stripe.status.enabled && stripe.status.demo;
+    const n = order.weigh.adjustments.length;
+    const fail = (msg) => res.status(400).json({ error: msg });
+
+    try {
+      if (action === 'refund') {
+        if (owed >= 0) return fail('Nothing to refund.');
+        if (!order.weigh.paid_online) return fail('This order was not paid online; give the customer the lower price at pickup.');
+        if (stripe.status.enabled && order.weigh.can_refund_in_stripe) {
+          const r = await stripe.refund(order.order_ref, -owed, `weight-refund-${id}-${n}`);
+          add('refund', -owed, { stripe_id: r.id, note: `Stripe refund ${r.status}` });
+        } else if (demo) {
+          add('refund', -owed, { demo: true, stripe_id: `re_demo_${crypto.randomBytes(6).toString('hex')}`, note: 'DEMO refund (no money moved)' });
+        } else {
+          return fail('This payment can\'t be refunded from here. Refund it in your Stripe or shop dashboard, then click "Refunded in Stripe".');
+        }
+      } else if (action === 'refunded_manually') {
+        if (owed >= 0) return fail('Nothing to refund.');
+        add('refund', -owed, { note: 'Refunded outside the program' });
+      } else if (action === 'charge_link') {
+        if (owed <= 0) return fail('Nothing extra to charge.');
+        if (order.weigh.pending_link) return res.json(getOrderWithItems(db, id));
+        const label = `Order ${order.slot_number != null ? `#${order.slot_number} (${order.pickup_date})` : `#${id}`} - weight adjustment`;
+        if (stripe.status.enabled) {
+          const s = await stripe.chargeLink({ orderId: id, label, amountCents: owed, email: order.customer_email, idempotencyKey: `weight-charge-${id}-${n}` });
+          add('charge', owed, { status: 'pending', stripe_id: s.id, url: s.url, note: 'Stripe payment link sent' });
+        } else if (demo) {
+          const fake = `cs_test_demo${crypto.randomBytes(8).toString('hex')}`;
+          add('charge', owed, { status: 'pending', demo: true, stripe_id: fake, url: `https://checkout.stripe.com/c/pay/${fake}#demo`, note: 'DEMO payment link' });
+        } else {
+          return fail('Stripe isn\'t connected, so a payment link can\'t be made. Collect the difference at pickup instead.');
+        }
+      } else if (action === 'mark_paid') {
+        const r = db.prepare("UPDATE adjustments SET status = 'done' WHERE id = ? AND order_id = ? AND status = 'pending'").run(Number(adjId), id);
+        if (!r.changes) return fail('That payment link is not waiting for payment.');
+      } else if (action === 'collected') {
+        if (owed <= 0) return fail('Nothing extra to collect.');
+        add('collected', owed, { note: 'Collected at pickup' });
+      } else if (action === 'waive') {
+        if (!owed) return fail('Nothing to waive.');
+        add('waive', Math.abs(owed), { note: owed > 0 ? 'Extra charge waived' : 'Refund not needed' });
+      } else {
+        return fail('Unknown action');
+      }
+    } catch (err) {
+      return res.status(502).json({ error: err.message });
+    }
+    changed('order', { id });
+    res.json(getOrderWithItems(db, id));
   });
 
   // ---------- Online orders ----------

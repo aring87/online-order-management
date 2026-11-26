@@ -34,6 +34,7 @@ const LINE_ITEMS = [
 // A stand-in for api.stripe.com.
 async function mockStripe(sessions) {
   const calls = [];
+  const posts = [];
   const server = http.createServer((req, res) => {
     calls.push(req.url);
     res.setHeader('Content-Type', 'application/json');
@@ -42,13 +43,25 @@ async function mockStripe(sessions) {
       return res.end(JSON.stringify({ error: { message: 'Invalid API Key provided' } }));
     }
     const url = new URL(req.url, 'http://x');
+    if (req.method === 'POST') {
+      let body = '';
+      req.on('data', (c) => { body += c; });
+      req.on('end', () => {
+        const form = Object.fromEntries(new URLSearchParams(body));
+        posts.push({ path: url.pathname, form, idem: req.headers['idempotency-key'] });
+        if (url.pathname === '/v1/refunds') return res.end(JSON.stringify({ id: `re_${posts.length}`, object: 'refund', status: 'succeeded', amount: Number(form.amount) }));
+        if (url.pathname === '/v1/checkout/sessions') return res.end(JSON.stringify({ id: `cs_adj_${posts.length}`, object: 'checkout.session', url: `https://checkout.stripe.com/c/pay/cs_adj_${posts.length}` }));
+        res.statusCode = 404; res.end('{}');
+      });
+      return;
+    }
     if (url.pathname === '/v1/checkout/sessions') return res.end(JSON.stringify({ object: 'list', data: sessions, has_more: false }));
     const m = url.pathname.match(/^\/v1\/checkout\/sessions\/([^/]+)\/line_items$/);
     if (m) return res.end(JSON.stringify({ object: 'list', data: LINE_ITEMS, has_more: false }));
     res.statusCode = 404; res.end('{}');
   }).listen(0);
   await new Promise((r) => server.once('listening', r));
-  return { base: `http://127.0.0.1:${server.address().port}`, calls, close: () => server.close() };
+  return { base: `http://127.0.0.1:${server.address().port}`, calls, posts, close: () => server.close() };
 }
 
 async function withServer(stripeOpts, fn) {
@@ -210,4 +223,79 @@ test('demo mode: fake signed Stripe notices become paid orders without any Strip
     assert.equal(online[0].items.length, 2, 'items taken from the notice, no Stripe API needed');
     const { data: st2 } = await req('/api/admin/stripe');
     assert.equal(st2.imported, 1);
+  }));
+
+
+test('weighing: reprice by actual weight, refund the difference through Stripe, or send a payment link', async () => {
+  const sessions = [paidSession('cs_test_w')];
+  const stripe = await mockStripe(sessions);
+  try {
+    await withServer({ secretKey: KEY, apiBase: stripe.base }, async (req) => {
+      await req('/api/admin/stripe/sync', { method: 'POST' });
+      const { data: [order] } = await req('/api/admin/online');
+      const ribeye = order.items.find((i) => i.unit === 'lb');          // 3 lb @ $24.99, paid $74.97
+      assert.equal(order.weigh.can_refund_in_stripe, true);
+      assert.equal(order.weigh.items_to_weigh, 1);
+
+      // Came in light: 2.8 lb → customer is owed $5.00
+      let { data: o } = await req(`/api/admin/items/${ribeye.id}/weight`, { method: 'PATCH', body: JSON.stringify({ actual: 2.8 }) });
+      assert.equal(o.items.find((i) => i.id === ribeye.id).actual_line_total_cents, Math.round(2.8 * 2499));
+      assert.equal(o.weigh.difference_cents, Math.round(2.8 * 2499) - 7497);
+      assert.equal(o.weigh.all_weighed, true);
+      ({ data: o } = await req(`/api/admin/orders/${order.id}/settle`, { method: 'POST', body: JSON.stringify({ action: 'refund' }) }));
+      const refundPost = stripe.posts.find((p) => p.path === '/v1/refunds');
+      assert.equal(refundPost.form.payment_intent, 'pi_cs_test_w');
+      assert.equal(Number(refundPost.form.amount), 7497 - Math.round(2.8 * 2499));
+      assert.ok(refundPost.idem, 'refunds use an idempotency key so a double click cannot refund twice');
+      assert.equal(o.weigh.outstanding_cents, 0);
+      assert.equal(o.weigh.adjustments[0].stripe_id, 're_1');
+
+      // Re-weighed heavier: 3.5 lb → now owes the extra over what was paid (and the refund already given)
+      ({ data: o } = await req(`/api/admin/items/${ribeye.id}/weight`, { method: 'PATCH', body: JSON.stringify({ actual: 3.5 }) }));
+      const owed = Math.round(3.5 * 2499) - 7497 + (7497 - Math.round(2.8 * 2499));
+      assert.equal(o.weigh.outstanding_cents, owed);
+      ({ data: o } = await req(`/api/admin/orders/${order.id}/settle`, { method: 'POST', body: JSON.stringify({ action: 'charge_link' }) }));
+      const linkPost = stripe.posts.find((p) => p.path === '/v1/checkout/sessions');
+      assert.equal(Number(linkPost.form['line_items[0][price_data][unit_amount]']), owed);
+      assert.equal(linkPost.form['metadata[kind]'], 'weight_adjustment');
+      assert.ok(o.weigh.pending_link.url.startsWith('https://checkout.stripe.com/'));
+      assert.equal(o.weigh.outstanding_cents, owed, 'still owed until the customer pays the link');
+
+      // Customer pays the link → next Stripe check marks it paid, and it is NOT added as a new order
+      sessions.push({ id: o.weigh.pending_link.stripe_id, object: 'checkout.session', status: 'complete', payment_status: 'paid',
+        amount_total: owed, created: now, metadata: { kind: 'weight_adjustment', order_id: String(order.id) } });
+      const sync = await req('/api/admin/stripe/sync', { method: 'POST' });
+      assert.equal(sync.data.added, 0);
+      ({ data: o } = await req(`/api/admin/orders/${order.id}`));
+      assert.equal(o.weigh.outstanding_cents, 0);
+      assert.equal((await req('/api/admin/online?show=all')).data.length, 1);
+    });
+  } finally { stripe.close(); }
+});
+
+test('weighing in demo mode, and for orders paid at pickup', () =>
+  withServer({ webhookSecret: 'whsec_demo_x', demo: true }, async (req) => {
+    const session = paidSession('cs_test_demo_w', { line_items: { object: 'list', data: LINE_ITEMS, has_more: false } });
+    const body = JSON.stringify({ type: 'checkout.session.completed', data: { object: session } });
+    await fetch(req.base + '/api/stripe/webhook', { method: 'POST', headers: { 'Stripe-Signature': sign(body, 'whsec_demo_x') }, body });
+    const { data: [order] } = await req('/api/admin/online');
+    const lb = order.items.find((i) => i.unit === 'lb');
+    await req(`/api/admin/items/${lb.id}/weight`, { method: 'PATCH', body: JSON.stringify({ actual: 3.25 }) });
+    let { data: o } = await req(`/api/admin/orders/${order.id}/settle`, { method: 'POST', body: JSON.stringify({ action: 'charge_link' }) });
+    assert.equal(o.weigh.pending_link.demo, 1);
+    assert.match(o.weigh.pending_link.url, /#demo$/);
+    ({ data: o } = await req(`/api/admin/orders/${order.id}/settle`, { method: 'POST',
+      body: JSON.stringify({ action: 'mark_paid', adjustment_id: o.weigh.pending_link.id }) }));
+    assert.equal(o.weigh.outstanding_cents, 0);
+
+    // In-store order (pay at pickup): no Stripe refund; difference is collected or waived at the counter.
+    const { data: store } = await req('/api/admin/orders', { method: 'POST', body: JSON.stringify({
+      name: 'Walk In', items: [{ name: 'Brisket', quantity: 5, unit: 'lb', unit_price_cents: 899 }] }) });
+    await req(`/api/admin/items/${store.items[0].id}/weight`, { method: 'PATCH', body: JSON.stringify({ actual: 4.6 }) });
+    const r = await req(`/api/admin/orders/${store.id}/settle`, { method: 'POST', body: JSON.stringify({ action: 'refund' }) });
+    assert.equal(r.status, 400);
+    const w = await req(`/api/admin/orders/${store.id}/settle`, { method: 'POST', body: JSON.stringify({ action: 'waive' }) });
+    assert.equal(w.data.weigh.outstanding_cents, 0);
+    assert.equal((await req(`/api/admin/items/999999/weight`, { method: 'PATCH', body: JSON.stringify({ actual: 1 }) })).status, 404);
+    assert.equal((await req(`/api/admin/items/${lb.id}/weight`, { method: 'PATCH', body: JSON.stringify({ actual: -3 }) })).status, 400);
   }));
