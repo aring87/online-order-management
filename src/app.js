@@ -8,6 +8,7 @@ const { transaction } = require('./db');
 const { findOrCreateCustomer, insertOrder, getOrderWithItems, listOrdersWithItems } = require('./orders');
 const { readSpreadsheet, importRows, FIELDS, ImportError } = require('./importer');
 const { createStripe } = require('./stripe');
+const { createEcwid } = require('./ecwid');
 const { itemTotals } = require('./reports');
 const { setActualWeight } = require('./weigh');
 const { slotsFor, slotCount, configure: configureSlots, assignSlotNumber, backfillSlotNumbers, pickupProblem } = require('./slots');
@@ -184,7 +185,7 @@ const HHMM = /^([01]\d|2[0-3]):[0-5]\d$/;
 
 function createApp(db, {
   adminPassword, sessionSecret = crypto.randomBytes(32).toString('hex'), stripe: stripeOpts = {},
-  pickup = {},
+  pickup = {}, ecwid: ecwidOpts = {},
 }) {
   // Pickup hours for the half-hour time slots offered on the order forms.
   const pickupHours = {
@@ -221,6 +222,12 @@ function createApp(db, {
     onAdjustmentPaid: (e) => changed('order', { id: e.order_id }) });
   app.locals.stripe = stripe;
   app.post('/api/stripe/webhook', express.raw({ type: () => true, limit: '1mb' }), stripe.webhook);
+
+  // Online orders from the Ecwid store behind the website (see src/ecwid.js).
+  const ecwid = createEcwid({ db, ...ecwidOpts,
+    onOrder: (e) => changed('online-order', { ...e, ...pickupNumber(e.id) }),
+    onChange: () => changed('order') });
+  app.locals.ecwid = ecwid;
 
   const limiter = loginLimiter();
   // No password = no login screen. (server.js then only listens on this computer.)
@@ -553,6 +560,14 @@ function createApp(db, {
     const order = getOrderWithItems(db, Number(req.params.id));
     if (!order) return res.status(404).json({ error: 'Order not found' });
     res.json(order);
+  });
+
+  // ---------- Ecwid ----------
+  app.get('/api/admin/ecwid', (req, res) => res.json(ecwid.status));
+  app.post('/api/admin/ecwid/sync', async (req, res) => {
+    if (!ecwid.status.enabled && !ecwid.status.demo) return res.status(400).json({ error: 'The Ecwid store is not connected yet. Add ECWID_STORE_ID and ECWID_TOKEN to the .env file.' });
+    try { res.json({ ...(await ecwid.sync()), status: ecwid.status }); }
+    catch (err) { res.status(502).json({ error: err.message, status: ecwid.status }); }
   });
 
   // ---------- Stripe ----------

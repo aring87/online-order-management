@@ -1145,7 +1145,38 @@ document.addEventListener('click', async (e) => {
   setTimeout(() => loadStripeStatus().catch(() => {}), 1200);
 });
 
+async function loadEcwidStatus() {
+  const st = await api('/api/admin/ecwid');
+  const box = $('#ecwid-status');
+  const ago = st.lastSyncAt ? `last checked ${new Date(st.lastSyncAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}` : 'checking…';
+  if (st.enabled) {
+    box.className = `stripe-status ${st.lastError ? 'err' : 'on'}`;
+    box.innerHTML = st.lastError
+      ? `<b>Website store problem:</b> ${esc(st.lastError)} <button type="button" class="link" id="ecwid-sync">Try again</button>`
+      : `<b>🛍 Website store connected</b> (Ecwid ${esc(st.store_id)}) — new orders appear here within a minute · ${ago}
+         <button type="button" class="link" id="ecwid-sync">Check now</button>`;
+  } else if (st.demo) {
+    box.className = 'stripe-status demo';
+    box.innerHTML = `<b>🛍 Website store: demo mode</b> — not connected to the real Ecwid store yet. To see fake website orders arrive,
+      double-click <code>demo-ecwid-orders.bat</code>. Add <code>ECWID_STORE_ID</code> and <code>ECWID_TOKEN</code> to <code>.env</code> to go live.`;
+  } else {
+    box.className = 'stripe-status off';
+    box.innerHTML = '<b>Website store not connected.</b> Add <code>ECWID_STORE_ID</code> and <code>ECWID_TOKEN</code> to the <code>.env</code> file (see the README).';
+  }
+}
+document.addEventListener('click', async (e) => {
+  if (e.target.id !== 'ecwid-sync') return;
+  e.target.textContent = 'Checking…';
+  e.target.disabled = true;
+  try {
+    const r = await api('/api/admin/ecwid/sync', { method: 'POST' });
+    if (!r.added) e.target.textContent = 'No new orders';
+  } catch (err) { if (!(err instanceof AuthError)) console.warn(err); }
+  setTimeout(() => loadEcwidStatus().catch(() => {}), 1200);
+});
+
 async function loadOnline() {
+  loadEcwidStatus().catch(() => {});
   loadStripeStatus().catch(() => {});
   const list = await api(`/api/admin/online?show=${$('#online-show').value}`);
   $('#online-empty').classList.toggle('hidden', list.length > 0);

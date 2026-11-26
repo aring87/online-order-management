@@ -8,7 +8,8 @@
     "test": "node --no-warnings --test test/*.test.js",
     "sample-data": "node scripts/make-sample-data.js",
     "demo-online-orders": "node scripts/demo-online-orders.js",
-    "demo-stripe-orders": "node scripts/demo-stripe-orders.js"
+    "demo-stripe-orders": "node scripts/demo-stripe-orders.js",
+    "demo-ecwid-orders": "node scripts/demo-ecwid-orders.js"
   },
   "engines": {
     "node": ">=22.13"

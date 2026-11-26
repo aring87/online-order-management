@@ -50,6 +50,10 @@ function pickupDays() {
   });
 }
 
+// Ecwid store (the website's online shop). With no token, demo orders are read from this file instead.
+const ecwidLive = Boolean(process.env.ECWID_STORE_ID && process.env.ECWID_TOKEN);
+const ecwidDemoFile = !ecwidLive && process.env.ECWID_DEMO !== '0' ? path.join(path.dirname(DB_FILE), 'ecwid-demo-orders.json') : null;
+
 const db = openDb(DB_FILE);
 const app = createApp(db, {
   adminPassword: ADMIN_PASSWORD,
@@ -62,6 +66,12 @@ const app = createApp(db, {
     successUrl: process.env.STRIPE_SUCCESS_URL || 'https://stripe.com',
     ...(process.env.STRIPE_API_BASE ? { apiBase: process.env.STRIPE_API_BASE } : {}),  // for testing only
   },
+  ecwid: {
+    storeId: process.env.ECWID_STORE_ID || '',
+    token: process.env.ECWID_TOKEN || '',
+    demoFile: ecwidDemoFile,
+    ...(process.env.ECWID_API_BASE ? { apiBase: process.env.ECWID_API_BASE } : {}),  // for testing only
+  },
   pickup: {
     open: process.env.PICKUP_OPEN, close: process.env.PICKUP_CLOSE,
     slotMinutes: process.env.PICKUP_SLOT_MINUTES, slotMax: process.env.PICKUP_SLOT_MAX,
@@ -69,6 +79,7 @@ const app = createApp(db, {
   },
 });
 app.locals.stripe.start();
+app.locals.ecwid.start();
 // Behind a hosting proxy (Render, Railway, Fly, nginx…) this makes HTTPS detection and IPs correct.
 if (process.env.TRUST_PROXY) app.set('trust proxy', process.env.TRUST_PROXY === 'true' ? true : process.env.TRUST_PROXY);
 
@@ -85,6 +96,8 @@ const server = app.listen(PORT, HOST, () => {
   console.log(`  Online order form: ${url}/`);
   console.log(`  Database:        ${DB_FILE}`);
   console.log(`  Login:           ${ADMIN_PASSWORD ? 'password required' : 'off — only this computer can open the program (set ADMIN_PASSWORD in .env to turn on)'}`);
+  const ec = app.locals.ecwid.status;
+  console.log(`  Ecwid store:     ${ec.enabled ? `connected (store ${ec.store_id}) — checking for orders every minute` : ec.demo ? 'demo mode (run demo-ecwid-orders.bat)' : 'not connected'}`);
   const st = app.locals.stripe.status;
   console.log(`  Stripe:          ${st.enabled ? `connected — checking for paid orders every minute${st.webhook ? ' (+ instant webhook)' : ''}` : 'not connected (add STRIPE_SECRET_KEY to .env)'}`);
   console.log('');

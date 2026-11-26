@@ -99,6 +99,31 @@ How the spreadsheet is read:
 - **Re-importing:** importing the same file again won't create duplicates. If the sheet has new rows, only the new orders are added.
 - **Skipped rows:** rows with no customer or no item are listed after the import so you can check them.
 
+## Connecting the website store (Ecwid, the "My e-Shop" orders)
+
+The website (springfieldbutcher.com) runs on **Duda**, and its online shop is an **Ecwid** store, **ID 113477012**. Once connected, every new website order appears on the **Online orders** tab within a minute, with no retyping.
+
+What comes across from each order:
+- **Customer:** name, phone and email. Returning customers join their existing history.
+- **Items:** the **package size** the customer picked becomes pounds ("1.5 lbs" × 2 packages = 3 lb, priced per lb). **Special Requests** become the item's cut instructions.
+- **Pickup or delivery:** the pickup day and time (which also gives the pickup number for that slot), or the delivery address.
+- **Payment:** **💳 Paid** for card payments. Pay-at-pickup orders come in too, without the Paid label.
+- **Order number:** Ecwid's own, kept as the program's order number, so it matches the My e-Shop app.
+
+The program also keeps orders in step with Ecwid:
+- **Paid later:** if a pay-at-pickup order is paid online afterwards, it gets marked **💳 Paid**.
+- **Cancelled or refunded in Ecwid:** the order is marked cancelled.
+- **Never twice:** orders are never added twice.
+
+**To connect:** ask WebnehTech (or Duda support) for an **Ecwid API token** for store 113477012 with permission to **read orders** (`read_orders`). Then add these two lines to `.env` and restart:
+```
+ECWID_STORE_ID=113477012
+ECWID_TOKEN=secret_...
+```
+The Online orders tab will then say **🛍 Website store connected**. The first time, it brings in the last 2 days of orders (`ECWID_FIRST_SYNC_DAYS` changes this). Never send the token by email or chat; only put it in `.env`.
+
+**Demo (no token needed):** with the program open on **Online orders**, double-click **`demo-ecwid-orders.bat`** (or run `npm run demo-ecwid-orders`). It creates fake website orders shaped exactly like Ecwid's: products such as "Ground Chuck 85/15 — Amount per package: 1.5lbs", special requests, pickup times in the shop's slots, and paid or pay-at-pickup. The program picks them up within a few seconds through the same code it uses for the real store. Run `node scripts/demo-ecwid-orders.js --clear` to remove the demo file.
+
 ## Connecting Stripe
 
 Once connected, every **paid** Stripe order (Checkout or Payment Links) appears on the **Online orders** tab with the customer's name, email, phone, items and quantities. It's marked **💳 Paid** on screen and on the printed ticket. Orders are never added twice, and unpaid or abandoned checkouts are ignored.
