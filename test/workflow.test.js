@@ -186,7 +186,11 @@ test('pickup slots: settings and item totals for one half-hour slot', async () =
   const base = `http://127.0.0.1:${server.address().port}`;
   const post = (body) => fetch(base + '/api/admin/orders', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
   try {
-    assert.deepEqual((await (await fetch(base + '/api/settings')).json()).pickup, { open: '09:00', close: '17:00', slot_minutes: 30, slot_max: 10 });
+    const { days, ...general } = (await (await fetch(base + '/api/settings')).json()).pickup;
+    assert.deepEqual(general, { open: '09:00', close: '17:00', slot_minutes: 30, slot_max: 10 });
+    assert.equal(days[1], null, 'closed Monday by default');
+    assert.deepEqual(days[0], { open: '10:00', close: '15:00' }, 'Sunday until 3 PM by default');
+    assert.deepEqual(days[2], { open: '09:00', close: '17:00' }, 'other days use the general hours');
     await post({ name: 'A', pickup_date: '2026-12-01', pickup_time: '10:00', items: [{ name: 'Brisket', quantity: 5, unit: 'lb' }] });
     await post({ name: 'B', pickup_date: '2026-12-01', pickup_time: '10:20', items: [{ name: 'Brisket', quantity: 3, unit: 'lb' }] });
     await post({ name: 'C', pickup_date: '2026-12-01', pickup_time: '10:30', items: [{ name: 'Brisket', quantity: 7, unit: 'lb' }] });
@@ -255,4 +259,38 @@ test('pickup numbers: slot 1 = #1-10, slot 2 = #11-20, per day; cancelling frees
   assert.equal(slots.slots.find((s) => s.start === '09:00').numbers, null);
   const { data: found } = await req(`/api/admin/orders/browse?show=all&q=%23151`);
   assert.ok(found.some((o) => o.id === d.id), 'search by pickup number');
+}));
+
+test('closed Mondays and Sunday pickups only until 3 PM', () => withServer(async (req) => {
+  const mon = '2026-11-30';   // Monday
+  const sun = '2026-11-29';   // Sunday
+  const order = (date, time, extra = {}) => req('/api/orders', { method: 'POST', auth: false,
+    body: online({ pickup_date: date, pickup_time: time, ...extra }) });
+
+  const m = await order(mon, '10:00');
+  assert.equal(m.status, 400);
+  assert.match(m.data.error, /closed on Mondays/);
+  assert.equal((await order(mon, '')).status, 400, 'Mondays are closed even without a time');
+
+  const late = await order(sun, '15:00');
+  assert.equal(late.status, 400);
+  assert.match(late.data.error, /Sundays pickup is between 10:00 AM and 3:00 PM/);
+  const ok = await order(sun, '14:30', { email: 'sun@example.com', phone: '555-010-0601' });
+  assert.equal(ok.status, 201, 'last Sunday slot 2:30-3:00 is fine');
+  assert.equal(ok.data.slot_number, 91, 'Sunday numbering still starts at 10:00 (2:30 slot = #91-100)');
+
+  const { data: monSlots } = await req(`/api/slots?date=${mon}`, { auth: false });
+  assert.equal(monSlots.closed, true);
+  assert.equal(monSlots.slots.length, 0);
+  const { data: sunSlots } = await req(`/api/slots?date=${sun}`, { auth: false });
+  assert.equal(sunSlots.slots.at(-1).start, '14:30', 'Sunday ends with the 2:30 slot');
+  assert.equal(sunSlots.slots.length, 10);
+
+  // Staff can still book a closed day (special arrangement); it just doesn't get a pickup number.
+  const staff = await req('/api/admin/orders', { method: 'POST', body: { name: 'Special', pickup_date: mon, pickup_time: '11:00', items: [{ name: 'Bacon', quantity: 1 }] } });
+  assert.equal(staff.status, 201);
+  assert.equal(staff.data.slot_number, null);
+  const { data: adminMon } = await req(`/api/admin/slots?date=${mon}`);
+  assert.equal(adminMon.closed, true);
+  assert.equal(adminMon.slots[0].orders.length, 1, 'a staff order on a closed day still shows');
 }));

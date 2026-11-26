@@ -9,7 +9,10 @@ const { findOrCreateCustomer, insertOrder, getOrderWithItems, listOrdersWithItem
 const { readSpreadsheet, importRows, FIELDS, ImportError } = require('./importer');
 const { createStripe } = require('./stripe');
 const { itemTotals } = require('./reports');
-const { slotsFor, slotCount, configure: configureSlots, assignSlotNumber, backfillSlotNumbers } = require('./slots');
+const { slotsFor, slotCount, configure: configureSlots, assignSlotNumber, backfillSlotNumbers, pickupProblem } = require('./slots');
+
+// The shop's week (Sunday first): closed Monday, Sunday until 3 PM, otherwise the general hours.
+const DEFAULT_DAYS = [{ open: '10:00', close: '15:00' }, null, {}, {}, {}, {}, {}];
 
 const STATUSES = ['new', 'preparing', 'ready', 'picked_up', 'cancelled'];
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -191,6 +194,12 @@ function createApp(db, {
     slot_max: Number.isInteger(Number(pickup.slotMax)) && Number(pickup.slotMax) >= 0 && pickup.slotMax !== '' && pickup.slotMax != null
       ? Number(pickup.slotMax) : 10,
   };
+  // Per-day hours: 7 entries Sunday→Saturday, each { open, close } (missing = general hours) or null = closed.
+  const days = Array.isArray(pickup.days) && pickup.days.length === 7 ? pickup.days : DEFAULT_DAYS;
+  pickupHours.days = days.map((d) => (d === null ? null : {
+    open: HHMM.test(d?.open) ? d.open : pickupHours.open,
+    close: HHMM.test(d?.close) ? d.close : pickupHours.close,
+  }));
   configureSlots(pickupHours);
   backfillSlotNumbers(db);
   const app = express();
@@ -238,6 +247,9 @@ function createApp(db, {
     const order = transaction(db, () => {
       // Online orders can't overbook a pickup slot (checked inside the transaction so two people
       // can't both take the last place).
+      // Only real opening hours can be booked online (closed Mondays, Sundays until 3 PM…).
+      const problem = o.pickupDate ? pickupProblem(o.pickupDate, o.pickupTime, pickupHours) : null;
+      if (problem) throw new ValidationError(problem);
       if (o.pickupDate && o.pickupTime && pickupHours.slot_max > 0
           && slotCount(db, o.pickupDate, o.pickupTime, pickupHours.slot_minutes) >= pickupHours.slot_max) {
         throw new ValidationError('Sorry, that pickup time just filled up. Please choose another time.');

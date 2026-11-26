@@ -37,6 +37,19 @@ function stripeDemoSecret() {
 }
 const demoSecret = stripeDemoSecret();
 
+// Pickup days: PICKUP_CLOSED_DAYS=mon (comma-separated, blank = open every day) and optional
+// PICKUP_HOURS_SUN=10:00-15:00 style overrides for any day. Defaults: closed Monday, Sunday 10-3.
+function pickupDays() {
+  const names = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'];
+  const closed = (process.env.PICKUP_CLOSED_DAYS ?? 'mon').toLowerCase().split(/[\s,]+/).map((d) => d.slice(0, 3));
+  const defaults = { sun: '10:00-15:00' };
+  return names.map((n) => {
+    if (closed.includes(n)) return null;
+    const m = String(process.env[`PICKUP_HOURS_${n.toUpperCase()}`] ?? defaults[n] ?? '').match(/^(\d{2}:\d{2})\s*-\s*(\d{2}:\d{2})$/);
+    return m ? { open: m[1], close: m[2] } : {};
+  });
+}
+
 const db = openDb(DB_FILE);
 const app = createApp(db, {
   adminPassword: ADMIN_PASSWORD,
@@ -50,6 +63,7 @@ const app = createApp(db, {
   pickup: {
     open: process.env.PICKUP_OPEN, close: process.env.PICKUP_CLOSE,
     slotMinutes: process.env.PICKUP_SLOT_MINUTES, slotMax: process.env.PICKUP_SLOT_MAX,
+    days: pickupDays(),
   },
 });
 app.locals.stripe.start();

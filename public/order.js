@@ -63,6 +63,7 @@ $('#order-form').addEventListener('submit', async (e) => {
   showError('');
   const items = selectedItems();
   if (!items.length) return showError('Please enter a quantity for at least one item.');
+  if (closedDay) return showError(closedDay);
 
   const f = e.target;
   const payload = {
@@ -146,12 +147,18 @@ fetch('/api/settings').then((r) => r.json()).then((s) => { $('#pickup_time').inn
   .catch(() => { $('#pickup_time').innerHTML += slotOptions(); });
 
 // Once a date is picked, show how many places are left in each slot; full slots can't be chosen.
+let closedDay = '';
 async function refreshSlots() {
   const date = $('#pickup_date').value;
   if (!date) return;
   let data;
   try { data = await (await fetch(`/api/slots?date=${date}`)).json(); } catch { return; }
   if (!data.slots) return;
+  // Closed days (e.g. Mondays) can't be chosen; other days list only that day's slots (Sundays until 3 PM).
+  closedDay = data.closed ? `Sorry, we're closed on ${data.day}s. Please choose another day.` : '';
+  $('#date-note').textContent = closedDay;
+  $('#date-note').classList.toggle('hidden', !closedDay);
+  $('#pickup_time').disabled = Boolean(closedDay);
   const nice = (t) => new Date(2000, 0, 1, Number(t.slice(0, 2)), Number(t.slice(3, 5))).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
   const chosen = $('#pickup_time').value;
   $('#pickup_time').innerHTML = '<option value="">Any time</option>' + data.slots.map((s) => {

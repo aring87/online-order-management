@@ -5,9 +5,24 @@
 const toMin = (t) => Number(t.slice(0, 2)) * 60 + Number(t.slice(3, 5));
 const hhmm = (m) => `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
 const slotStart = (time, step) => hhmm(Math.floor(toMin(time) / step) * step);
+const DAY_NAMES = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+const weekday = (date) => new Date(`${date}T12:00:00Z`).getUTCDay();
+
+/**
+ * Opening hours for one date: { open, close } or null when closed that day.
+ * hours.days is a 7-item list (Sunday first) of { open, close } or null; missing → the general open/close.
+ */
+function hoursOn(date, hours) {
+  const d = hours.days ? hours.days[weekday(date)] : undefined;
+  if (d === null) return null;
+  return { open: d?.open || hours.open, close: d?.close || hours.close };
+}
 
 /** Every slot of the day with its order count. Cancelled orders don't count. */
-function slotsFor(db, date, { open, close, slot_minutes: step, slot_max: max }) {
+function slotsFor(db, date, hours) {
+  const { slot_minutes: step, slot_max: max } = hours;
+  const today = hoursOn(date, hours);
+  const { open, close } = today || { open: '00:00', close: '00:00' };   // closed: only slots that have orders
   const orders = db.prepare(`
     SELECT o.id, o.slot_number, o.pickup_date, o.customer_id, o.pickup_time, o.status, o.source, o.payment_status, c.name AS customer_name,
            (SELECT COUNT(*) FROM order_items i WHERE i.order_id = o.id) AS item_count
@@ -26,14 +41,15 @@ function slotsFor(db, date, { open, close, slot_minutes: step, slot_max: max }) 
   }
   const list = [...slots.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([start, os]) => ({
     start,
-    numbers: numberRange(start),
+    numbers: numberRange(start, date),
     end: hhmm(toMin(start) + step),
     count: os.length,
     max,
     full: max > 0 && os.length >= max,
     orders: os,
   }));
-  return { date, max, slots: list, no_time: noTime, total: orders.length };
+  return { date, max, closed: !today, day: DAY_NAMES[weekday(date)], open: today?.open ?? null, close: today?.close ?? null,
+    slots: list, no_time: noTime, total: orders.length };
 }
 
 /** How many orders are already in the slot this time falls in (for the 10-per-slot limit). */
@@ -52,16 +68,18 @@ let config = { open: '10:00', close: '18:00', slot_minutes: 30, slot_max: 10 };
 function configure(hours) { config = { ...config, ...hours }; }
 const blockSize = () => (config.slot_max > 0 ? config.slot_max : 10);
 
-/** 0 for the first slot of the day, 1 for the next…; null if the time is outside opening hours. */
-function slotIndex(time) {
+/** 0 for the first slot of the day, 1 for the next…; null if the time is outside that day's hours. */
+function slotIndex(time, date) {
   const step = config.slot_minutes;
+  const h = date ? hoursOn(date, config) : config;
+  if (!h) return null;
   const start = toMin(slotStart(time, step));
-  const idx = (start - toMin(config.open)) / step;
-  if (idx < 0 || start + step > toMin(config.close)) return null;
+  const idx = (start - toMin(h.open)) / step;
+  if (idx < 0 || start + step > toMin(h.close)) return null;
   return idx;
 }
-function numberRange(time) {
-  const idx = slotIndex(time);
+function numberRange(time, date) {
+  const idx = slotIndex(time, date);
   if (idx == null) return null;
   const first = idx * blockSize() + 1;
   return { first, last: first + blockSize() - 1 };
@@ -71,7 +89,7 @@ function numberRange(time) {
 function assignSlotNumber(db, orderId) {
   const o = db.prepare('SELECT id, pickup_date, pickup_time, status FROM orders WHERE id = ?').get(orderId);
   let n = null;
-  const range = o && o.status !== 'cancelled' && o.pickup_date && o.pickup_time ? numberRange(o.pickup_time) : null;
+  const range = o && o.status !== 'cancelled' && o.pickup_date && o.pickup_time ? numberRange(o.pickup_time, o.pickup_date) : null;
   if (range) {
     const taken = new Set(db.prepare(`
       SELECT slot_number FROM orders
@@ -92,4 +110,18 @@ function backfillSlotNumbers(db) {
   return ids.length;
 }
 
-module.exports = { slotsFor, slotCount, slotStart, configure, assignSlotNumber, backfillSlotNumbers, numberRange };
+/** Why a customer can't pick this date/time, or null if it's fine. */
+function pickupProblem(date, time, hours) {
+  const h = hoursOn(date, hours);
+  const nice = (t) => { const [hh, mm] = t.split(':').map(Number); return `${((hh + 11) % 12) + 1}:${String(mm).padStart(2, '0')} ${hh < 12 ? 'AM' : 'PM'}`; };
+  if (!h) return `Sorry, we're closed on ${DAY_NAMES[weekday(date)]}s. Please choose another day.`;
+  if (time) {
+    const start = toMin(slotStart(time, hours.slot_minutes));
+    if (start < toMin(h.open) || start + hours.slot_minutes > toMin(h.close)) {
+      return `On ${DAY_NAMES[weekday(date)]}s pickup is between ${nice(h.open)} and ${nice(h.close)}. Please choose another time.`;
+    }
+  }
+  return null;
+}
+
+module.exports = { slotsFor, slotCount, slotStart, configure, assignSlotNumber, backfillSlotNumbers, numberRange, hoursOn, pickupProblem };

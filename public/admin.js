@@ -510,7 +510,8 @@ async function loadSlots() {
   const d = await api(`/api/admin/slots?date=${date}`);
   const t = todayISO();
   const rel = date === t ? 'Today · ' : date === shiftDay(t, 1) ? 'Tomorrow · ' : '';
-  $('#sl-title').textContent = `${rel}${new Date(date + 'T00:00').toLocaleDateString([], { weekday: 'long', month: 'long', day: 'numeric' })}`;
+  $('#sl-title').textContent = `${rel}${new Date(date + 'T00:00').toLocaleDateString([], { weekday: 'long', month: 'long', day: 'numeric' })}`
+    + (d.closed ? ' · Closed' : d.close && d.close !== pickupHours.close ? ` · open until ${clock(d.close)}` : '');
   const used = d.slots.filter((s) => s.count);
   const busiest = used.reduce((m, s) => (s.count > (m?.count || 0) ? s : m), null);
   $('#sl-stats').innerHTML = `
@@ -518,7 +519,7 @@ async function loadSlots() {
     <div class="stat"><div class="v">${d.slots.filter((s) => s.full).length}</div><div class="l">Full slots</div></div>
     <div class="stat"><div class="v">${d.max || '∞'}</div><div class="l">Max per slot (online)</div></div>
     ${busiest ? `<div class="stat"><div class="v">${clock(busiest.start)}</div><div class="l">Busiest slot (${busiest.count})</div></div>` : ''}`;
-  $('#sl-grid').innerHTML = d.slots.map((s) => {
+  $('#sl-grid').innerHTML = (d.closed ? `<div class="slot-closed">🔒 Closed on ${esc(d.day)}s. Customers can't book pickups this day.${d.total ? ' Orders staff booked anyway are shown below.' : ''}</div>` : '') + d.slots.map((s) => {
     const pct = s.max ? Math.min(100, Math.round((s.count / s.max) * 100)) : 0;
     const level = s.full ? 'full' : pct >= 70 ? 'busy' : s.count ? 'some' : 'empty';
     return `<div class="slot-card ${level}">
@@ -739,14 +740,23 @@ $('#n-name').addEventListener('change', () => {
 });
 // Show how full each slot is for the chosen pickup day (staff can still book a full slot).
 let nSlots = {};
+let nClosed = null;
 async function refreshNewOrderSlots() {
   const date = $('#n-pickup').value;
   nSlots = {};
+  nClosed = null;
   const chosen = $('#n-time').value;
   if (!date) { fillSlotSelects(); $('#n-time').value = chosen; return; }
   const d = await api(`/api/admin/slots?date=${date}`).catch(() => null);
   if (!d) return;
   for (const s of d.slots) nSlots[s.start] = s;
+  if (d.closed) {
+    // Closed day (e.g. Monday): staff can still book it for a special arrangement, after a warning.
+    nClosed = d.day;
+    fillSlotSelects();
+    $('#n-time').value = chosen;
+    return;
+  }
   $('#n-time').innerHTML = '<option value="">Any time</option>' + d.slots.map((s) =>
     `<option value="${s.start}">${slotLabel(s.start)} — ${s.count}${s.max ? `/${s.max}` : ''} orders${s.full ? ' · FULL' : ''}</option>`).join('');
   $('#n-time').value = chosen;
@@ -813,6 +823,7 @@ $('#new-form').addEventListener('submit', async (e) => {
   showError($('#new-error'), '');
   const items = newOrderItems().filter((it) => it.name).map(({ tr, ...it }) => it);
   if (!items.length) return showError($('#new-error'), 'Add at least one item.');
+  if (nClosed && !confirm(`The shop is normally closed on ${nClosed}s. Book this pickup anyway?`)) return;
   const slot = nSlots[$('#n-time').value];
   if (slot?.full && !confirm(`The ${slotLabel(slot.start)} slot already has ${slot.count} orders (max ${slot.max}). Add this order anyway?`)) return;
   const btn = e.submitter || $('#new-form button[type=submit]');

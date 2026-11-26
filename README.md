@@ -75,7 +75,16 @@ Orders with other times, from imports or Stripe, go into the slot they fall in (
 - **Imported and Stripe orders:** always accepted, since the customer has already paid. They do count toward the slot.
 - **Changing the limit:** set `PICKUP_SLOT_MAX` in `.env` (0 = no limit), then restart.
 
-**Opening hours** default to 10:00 AM – 6:00 PM. Change them in `.env` with `PICKUP_OPEN=10:00` and `PICKUP_CLOSE=18:00` (24-hour clock), then restart the program. The same hours apply every day.
+**Opening hours:** pickups run **10:00 AM – 6:00 PM**, except:
+- **Mondays:** closed. Customers who pick a Monday see "Sorry, we're closed on Mondays".
+- **Sundays:** 10:00 AM – 3:00 PM, so the last slot is 2:30–3:00 PM, with pickup numbers #91–100.
+
+The program re-checks this when an order is placed. Staff can still book a closed day or time with **New order** after a warning, for special arrangements; those orders don't get a pickup number.
+
+**Changing the hours:** edit `.env` and restart the program.
+- **Normal hours:** `PICKUP_OPEN=10:00` and `PICKUP_CLOSE=18:00` (24-hour clock).
+- **Closed days:** `PICKUP_CLOSED_DAYS=mon`, comma-separated. Leave it blank to open every day.
+- **One day's hours:** `PICKUP_HOURS_SUN=10:00-15:00`, and the same for any other day (`PICKUP_HOURS_SAT=09:00-17:00`…).
 
 ## Importing the Excel spreadsheet
 
