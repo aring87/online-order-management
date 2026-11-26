@@ -18,6 +18,12 @@ Every order has an **order number** (#47). It's shown big on screen, on the prin
   - **# Order:** a plain list by order number.
   - **Filters:** open orders or all orders (or one status), a pickup date (overdue, today, tomorrow, next 7 days), and where the order came from (online, in-store, imported).
   - **🖨 Print this list** prints exactly what's on screen. Organized by Item, it makes a cut list for the back.
+- **📊 Item totals:** how much of each item, and each cut of it, is needed or was sold. It's grouped by meat (Beef, Pork, Poultry, Lamb), and the program remembers the settings.
+  - **🔪 Prep list (by pickup day):** everything due for pickup on a day (tomorrow by default), totalled so it can be cut and prepped the day before. For example: *Ribeye Steak 26 lb — 1.25" thick 4 lb (2 orders), 1" thick 5 lb (1 order), no special cut 12.5 lb*. **🖨 Print** gives a checklist. Items that haven't been ticked off as packed on the prep board are noted.
+  - **💵 Sold (by order date):** totals for today, yesterday, the last 7 or 30 days, this month, last month, this year, all time or chosen dates, with pounds, pieces, number of orders and dollars per item.
+  - **Filters:** online orders only (the default), in-store and phone only, or all orders. Every order except cancelled, only orders not yet picked up, or only picked-up orders.
+  - **⬇ Excel** downloads the totals as a spreadsheet.
+  - **Matching:** the same item spelled differently ("Ribeye Steak", "ribeye steak", "Ribeye Steak (per lb)") is counted together.
 - **New order:** enter phone or walk-in orders, with a pickup date and ready-by time. Start typing a name to pick an existing customer.
 - **Import from Excel:** load the existing spreadsheet (.xlsx or .csv). See below.
 - **Export to Excel:** download everything as a spreadsheet, one row per item.

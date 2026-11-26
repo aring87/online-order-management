@@ -8,6 +8,7 @@ const { transaction } = require('./db');
 const { findOrCreateCustomer, insertOrder, getOrderWithItems, listOrdersWithItems } = require('./orders');
 const { readSpreadsheet, importRows, FIELDS, ImportError } = require('./importer');
 const { createStripe } = require('./stripe');
+const { itemTotals } = require('./reports');
 
 const STATUSES = ['new', 'preparing', 'ready', 'picked_up', 'cancelled'];
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -298,6 +299,18 @@ function createApp(db, { adminPassword, sessionSecret = crypto.randomBytes(32).t
   // Orders with their items, for the "Organize by customer / item / pickup day" views.
   // ?show=open|all|<status>  &from=YYYY-MM-DD&to=YYYY-MM-DD (pickup date)  &nodate=1 (only orders without a date)
   // &source=online|manual|import  &q=search
+  // Totals per item and per cut, for the prep list (by pickup date) and sales (by order date).
+  app.get('/api/admin/reports/items', (req, res) => {
+    const isDate = (d) => (/^\d{4}-\d{2}-\d{2}$/.test(d) ? d : undefined);
+    res.json(itemTotals(db, {
+      basis: req.query.basis === 'order' ? 'order' : 'pickup',
+      from: isDate(req.query.from),
+      to: isDate(req.query.to),
+      show: ['open', 'done'].includes(req.query.show) ? req.query.show : 'all',
+      source: ['online', 'store', 'manual', 'import'].includes(req.query.source) ? req.query.source : '',
+    }));
+  });
+
   app.get('/api/admin/orders/browse', (req, res) => {
     const where = ['1 = 1'];
     const params = [];

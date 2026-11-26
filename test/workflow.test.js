@@ -143,3 +143,38 @@ test('with no password there is no login screen', async () => {
     assert.equal((await fetch(base + '/api/admin/login', { method: 'POST' })).status, 200);
   } finally { server.closeAllConnections(); server.close(); }
 });
+
+test('item totals: per item and per cut, filtered by pickup/order date and source', () => withServer(async (req) => {
+  const mk = (body) => req('/api/admin/orders', { method: 'POST', body });
+  await mk({ name: 'A', pickup_date: '2026-12-01', items: [
+    { name: 'Ribeye Steak', quantity: 4, unit: 'lb', unit_price_cents: 2499, cut_instructions: '1.25" thick' },
+    { name: 'Whole Chicken', quantity: 2, unit: 'each', unit_price_cents: 1499 }] });
+  await mk({ name: 'B', pickup_date: '2026-12-01', items: [
+    { name: 'ribeye steak', quantity: 2, unit: 'lb', unit_price_cents: 2499, cut_instructions: '1.25"  thick' },
+    { name: 'Ribeye Steak (per lb)', quantity: 3, unit: 'lb', unit_price_cents: 2499 }] });
+  await mk({ name: 'C', pickup_date: '2026-12-02', items: [{ name: 'Ribeye Steak', quantity: 10, unit: 'lb' }] });
+  const x = (await mk({ name: 'X', pickup_date: '2026-12-01', items: [{ name: 'Ribeye Steak', quantity: 99, unit: 'lb' }] })).data;
+  await req(`/api/admin/orders/${x.id}`, { method: 'PATCH', body: { status: 'cancelled' } });
+  await req('/api/orders', { method: 'POST', auth: false, body: online({ pickup_date: '2026-12-01',
+    items: [{ product_id: 1, quantity: 1.5, cut_instructions: '1.25" thick' }] }) });   // product 1 = Ribeye Steak
+
+  const get = async (qs) => (await req(`/api/admin/reports/items?${qs}`)).data;
+  const day = await get('basis=pickup&from=2026-12-01&to=2026-12-01');
+  const ribeye = day.items.find((i) => i.name === 'Ribeye Steak');
+  assert.equal(ribeye.lb, 10.5, 'same item spelled differently is counted together; cancelled excluded');
+  assert.equal(ribeye.orders, 3);
+  assert.equal(ribeye.category, 'Beef');
+  assert.deepEqual(ribeye.cuts.map((c) => [c.cut, c.lb, c.orders]), [['1.25" thick', 7.5, 3], ['', 3, 1]]);
+  const chicken = day.items.find((i) => i.name === 'Whole Chicken');
+  assert.equal(chicken.each, 2);
+  assert.equal(chicken.category, 'Poultry');
+  assert.equal(day.totals.orders, 3);
+
+  const onlineOnly = await get('basis=pickup&from=2026-12-01&to=2026-12-01&source=online');
+  assert.deepEqual(onlineOnly.items.map((i) => [i.name, i.lb]), [['Ribeye Steak', 1.5]]);
+  const store = await get('basis=pickup&from=2026-12-01&to=2026-12-01&source=store');
+  assert.equal(store.items.find((i) => i.name === 'Ribeye Steak').lb, 9);
+
+  const allTime = await get('basis=order');
+  assert.equal(allTime.items.find((i) => i.name === 'Ribeye Steak').lb, 20.5);
+}));

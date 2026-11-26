@@ -72,7 +72,7 @@ $('#logout').addEventListener('click', async () => {
 });
 
 // ================= Views & routing =================
-const VIEWS = ['board', 'online', 'customers', 'orders', 'new', 'import'];
+const VIEWS = ['board', 'online', 'customers', 'orders', 'totals', 'new', 'import'];
 function show(view) {
   for (const v of VIEWS) $(`#view-${v}`).classList.toggle('hidden', v !== view);
   document.querySelectorAll('.tabs button').forEach((b) => b.classList.toggle('active', b.dataset.view === view));
@@ -96,6 +96,7 @@ async function route({ quiet = false } = {}) {
       await loadCustomers();
       if (m) await loadCustomer(m[1], { quiet }); else clearCustomer();
     } else if (h === 'orders') { show('orders'); await loadOrders(); }
+    else if (h === 'totals') { show('totals'); await loadTotals(); }
     else if (h.startsWith('new')) { show('new'); if (!quiet) startNewOrder(new URLSearchParams(h.split('?')[1]).get('customer')); }
     else if (h === 'import') { show('import'); }
     else { location.hash = ''; }
@@ -423,6 +424,156 @@ $('#print-list').addEventListener('click', () => {
       <div class="browse by-${prefs.group}">${RENDER[prefs.group](browseOrders, true)}</div>
     </div>`;
   window.print();
+});
+
+// ================= Item totals (prep list & sales) =================
+const tPrefs = (() => { try { return JSON.parse(localStorage.getItem('totals-view') || '{}'); } catch { return {}; } })();
+const saveT = () => { try { localStorage.setItem('totals-view', JSON.stringify(tPrefs)); } catch { /* ignore */ } };
+tPrefs.mode ||= 'prep';
+tPrefs.source ??= 'online';
+const RANGES = {
+  prep: [['tomorrow', 'Pickup tomorrow'], ['today', 'Pickup today'], ['next2', 'Today + tomorrow'], ['week', 'Next 7 days'], ['custom', 'Pick dates…']],
+  sales: [['today', 'Today'], ['yesterday', 'Yesterday'], ['last7', 'Last 7 days'], ['thismonth', 'This month'], ['lastmonth', 'Last month'],
+    ['last30', 'Last 30 days'], ['year', 'This year'], ['all', 'All time'], ['custom', 'Pick dates…']],
+};
+let totalsData = null;
+
+const isoLocal = (d) => new Date(d - d.getTimezoneOffset() * 6e4).toISOString().slice(0, 10);
+const addDays = (n) => isoLocal(new Date(Date.now() + n * 864e5));
+function rangeDates(key) {
+  const now = new Date();
+  switch (key) {
+    case 'today': return [addDays(0), addDays(0)];
+    case 'tomorrow': return [addDays(1), addDays(1)];
+    case 'yesterday': return [addDays(-1), addDays(-1)];
+    case 'next2': return [addDays(0), addDays(1)];
+    case 'week': return [addDays(0), addDays(6)];
+    case 'last7': return [addDays(-6), addDays(0)];
+    case 'last30': return [addDays(-29), addDays(0)];
+    case 'thismonth': return [isoLocal(new Date(now.getFullYear(), now.getMonth(), 1)), addDays(0)];
+    case 'lastmonth': return [isoLocal(new Date(now.getFullYear(), now.getMonth() - 1, 1)), isoLocal(new Date(now.getFullYear(), now.getMonth(), 0))];
+    case 'year': return [isoLocal(new Date(now.getFullYear(), 0, 1)), addDays(0)];
+    case 'all': return ['', ''];
+    default: return [$('#t-from').value, $('#t-to').value];
+  }
+}
+
+function setMode(mode) {
+  tPrefs.mode = mode; saveT();
+  document.querySelectorAll('#t-mode [data-mode]').forEach((b) => {
+    b.classList.toggle('active', b.dataset.mode === mode); b.setAttribute('aria-checked', b.dataset.mode === mode);
+  });
+  $('#t-range').innerHTML = RANGES[mode].map(([k, v]) => `<option value="${k}">${v}</option>`).join('');
+  const saved = tPrefs[`range_${mode}`];
+  $('#t-range').value = RANGES[mode].some(([k]) => k === saved) ? saved : RANGES[mode][0][0];
+  $('#t-show').value = tPrefs[`show_${mode}`] || 'all';
+  updateCustom();
+}
+function updateCustom() {
+  const custom = $('#t-range').value === 'custom';
+  $('#t-custom').classList.toggle('hidden', !custom);
+  if (custom && !$('#t-from').value) {
+    const [f, t] = tPrefs.mode === 'prep' ? [addDays(1), addDays(1)] : [addDays(-6), addDays(0)];
+    $('#t-from').value = f; $('#t-to').value = t;
+  }
+}
+$('#t-source').value = tPrefs.source;
+setMode(tPrefs.mode);
+
+$('#t-mode').addEventListener('click', (e) => {
+  const b = e.target.closest('[data-mode]');
+  if (b) { setMode(b.dataset.mode); loadTotals().catch(() => {}); }
+});
+$('#t-range').addEventListener('change', () => { tPrefs[`range_${tPrefs.mode}`] = $('#t-range').value; saveT(); updateCustom(); loadTotals().catch(() => {}); });
+$('#t-show').addEventListener('change', () => { tPrefs[`show_${tPrefs.mode}`] = $('#t-show').value; saveT(); loadTotals().catch(() => {}); });
+$('#t-source').addEventListener('change', () => { tPrefs.source = $('#t-source').value; saveT(); loadTotals().catch(() => {}); });
+for (const id of ['#t-from', '#t-to']) $(id).addEventListener('change', () => loadTotals().catch(() => {}));
+
+const fmtQty = (lb, each) => [lb ? `${lb} lb` : '', each ? `${each}${lb ? ' each' : ''}` : ''].filter(Boolean).join(' + ') || '0';
+const dLong = (s) => new Date(s + 'T00:00').toLocaleDateString([], { weekday: 'long', month: 'long', day: 'numeric' });
+function totalsTitle() {
+  const [from, to] = rangeDates($('#t-range').value);
+  const what = tPrefs.mode === 'prep' ? 'Prep list' : 'Sold';
+  const when = !from && !to ? 'all time' : from === to ? (tPrefs.mode === 'prep' ? `pickup ${dLong(from)}` : dLong(from))
+    : `${tPrefs.mode === 'prep' ? 'pickup ' : ''}${day(from)} – ${day(to)}`;
+  return `${what} · ${when} · ${$('#t-source').selectedOptions[0].text}${$('#t-show').value !== 'all' ? ` · ${$('#t-show').selectedOptions[0].text}` : ''}`;
+}
+
+async function loadTotals() {
+  const [from, to] = rangeDates($('#t-range').value);
+  const p = new URLSearchParams({ basis: tPrefs.mode === 'prep' ? 'pickup' : 'order', show: $('#t-show').value });
+  if (from) p.set('from', from);
+  if (to) p.set('to', to);
+  if ($('#t-source').value) p.set('source', $('#t-source').value);
+  totalsData = await api(`/api/admin/reports/items?${p}`);
+  renderTotals();
+}
+
+function totalsHtml(data, print) {
+  const sales = tPrefs.mode === 'sales';
+  const cats = [...new Set(data.items.map((i) => i.category))];
+  return cats.map((cat) => {
+    const items = data.items.filter((i) => i.category === cat);
+    const catQty = fmtQty(Math.round(items.reduce((s, i) => s + i.lb, 0) * 100) / 100, items.reduce((s, i) => s + i.each, 0));
+    return `<section class="group t-cat">
+      <header class="group-head"><div class="g-title">${esc(cat)} <span class="g-total">${esc(catQty)}</span></div>
+        <div class="g-sub">${items.length} item${items.length === 1 ? '' : 's'}${sales ? ` · ${money(items.reduce((s, i) => s + i.revenue_cents, 0))}` : ''}</div></header>
+      <table class="t-table"><tbody>${items.map((it) => {
+        const special = it.cuts.filter((c) => c.cut);
+        const rows = it.cuts.length > 1 || special.length ? it.cuts.map((c) => `<tr class="t-cut">
+            <td class="t-check">${print ? '☐' : ''}</td>
+            <td class="t-name">${c.cut ? `<span class="cut-inline">✂ ${esc(c.cut)}</span>` : '<span class="muted">no special cut</span>'}</td>
+            <td class="t-qty">${esc(fmtQty(c.lb, c.each))}</td>
+            <td class="t-orders muted">${c.orders} order${c.orders === 1 ? '' : 's'}</td>
+            ${sales ? '<td></td>' : ''}</tr>`).join('') : '';
+        return `<tr class="t-item">
+            <td class="t-check">${print && !rows ? '☐' : ''}</td>
+            <td class="t-name"><b>${esc(it.name)}</b>${!print && !sales && it.packed_lines ? ` <span class="muted t-packed">${it.packed_lines}/${it.lines} packed</span>` : ''}</td>
+            <td class="t-qty"><b>${esc(fmtQty(it.lb, it.each))}</b></td>
+            <td class="t-orders">${it.orders} order${it.orders === 1 ? '' : 's'}</td>
+            ${sales ? `<td class="t-money">${money(it.revenue_cents)}</td>` : ''}</tr>${rows}`;
+      }).join('')}</tbody></table></section>`;
+  }).join('');
+}
+
+function renderTotals() {
+  const d = totalsData;
+  $('#t-title').textContent = totalsTitle();
+  $('#t-empty').classList.toggle('hidden', d.items.length > 0);
+  $('#t-stats').innerHTML = d.items.length ? `
+    <div class="stat"><div class="v">${d.totals.lb} lb</div><div class="l">By the pound</div></div>
+    <div class="stat"><div class="v">${d.totals.each}</div><div class="l">By the piece</div></div>
+    <div class="stat"><div class="v">${d.totals.items}</div><div class="l">Different items</div></div>
+    <div class="stat"><div class="v">${d.totals.orders}</div><div class="l">Orders</div></div>
+    ${tPrefs.mode === 'sales' ? `<div class="stat"><div class="v">${money(d.totals.revenue_cents)}</div><div class="l">Sales (est.)</div></div>` : ''}` : '';
+  $('#t-out').innerHTML = totalsHtml(d, false);
+}
+
+$('#t-print').addEventListener('click', () => {
+  if (!totalsData) return;
+  $('#print-area').innerHTML = `<div class="pl">
+    <h1>${esc(totalsTitle())}</h1>
+    <p class="pl-meta">${totalsData.totals.orders} orders · ${totalsData.totals.lb} lb + ${totalsData.totals.each} pieces · printed ${new Date().toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' })}</p>
+    ${totalsHtml(totalsData, true)}</div>`;
+  window.print();
+});
+
+$('#t-csv').addEventListener('click', () => {
+  if (!totalsData) return;
+  const cell = (v) => { const s = String(v ?? ''); return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; };
+  const lines = [['Meat', 'Item', 'Cut', 'Pounds', 'Pieces', 'Orders', 'Sales ($)']];
+  for (const it of totalsData.items) {
+    lines.push([it.category, it.name, 'ALL', it.lb, it.each, it.orders, (it.revenue_cents / 100).toFixed(2)]);
+    if (it.cuts.length > 1 || it.cuts.some((c) => c.cut)) {
+      for (const c of it.cuts) lines.push([it.category, it.name, c.cut || '(no special cut)', c.lb, c.each, c.orders, '']);
+    }
+  }
+  const csv = '﻿' + [[totalsTitle()], [], ...lines].map((l) => l.map(cell).join(',')).join('\r\n');
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv' }));
+  a.download = `${tPrefs.mode === 'prep' ? 'prep-list' : 'sales'}-${todayISO()}.csv`;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
 });
 
 // ================= New order =================

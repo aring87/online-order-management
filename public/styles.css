@@ -462,3 +462,31 @@ table.gtable.flat tr:last-child td { border-bottom: 1px solid var(--border); }
 .stripe-status.demo code { background: rgba(0,0,0,.06); padding: 1px 5px; border-radius: 4px; }
 
 .t-notes, .g-note, .notes { white-space: pre-line; }
+
+/* ---------- Item totals ---------- */
+.t-title { font-weight: 700; margin: 6px 0 10px; }
+.t-stats { margin-bottom: 16px; }
+.t-custom { display: inline-flex; align-items: center; gap: 6px; }
+.t-custom input { width: auto; }
+.t-table { width: 100%; border-collapse: collapse; table-layout: fixed; }
+.t-table td { padding: 8px 12px; border-bottom: 1px solid var(--border); vertical-align: middle; }
+.t-table tr:last-child td { border-bottom: 0; }
+.t-check { width: 28px; padding-right: 0 !important; font-size: 1.2rem; }
+.t-qty { width: 150px; text-align: right; white-space: nowrap; }
+.t-orders { width: 110px; text-align: right; white-space: nowrap; }
+.t-money { width: 110px; text-align: right; white-space: nowrap; }
+.t-item td { background: #fff; }
+.t-item .t-qty b { font-size: 1.05rem; }
+.t-cut td { background: #fcfaf8; font-size: .92rem; padding-top: 5px; padding-bottom: 5px; }
+.t-cut .t-name { padding-left: 34px; }
+.t-packed { font-size: .8rem; margin-left: 6px; }
+@media (max-width: 700px) {
+  .t-qty { width: 95px; } .t-orders { width: 72px; } .t-money { width: 80px; }
+  .t-cut .t-name { padding-left: 14px; }
+  .t-custom { width: 100%; }
+}
+@media print {
+  .pl .t-table td { padding: 4px 8px; border-bottom: 1px solid #bbb; color: #000; }
+  .pl .t-cut td { background: none !important; }
+  .pl .t-check { font-size: 14pt; }
+}
