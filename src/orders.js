@@ -1,6 +1,7 @@
 'use strict';
 
 const { phoneKey, nameKey } = require('./db');
+const { assignSlotNumber } = require('./slots');
 
 /**
  * Find the customer this order belongs to, or create them.
@@ -74,6 +75,7 @@ function insertOrder(db, o) {
     insertItem.run(id, it.productId ?? null, it.name, it.unit || 'each', it.quantity,
       it.unitPriceCents, it.lineTotalCents, it.cut || null);
   }
+  assignSlotNumber(db, id);
   return id;
 }
 

@@ -521,3 +521,10 @@ tr.slot-row td { background: #f1ebe5; font-weight: 700; font-size: .88rem; paddi
 .slot-orders a:hover { text-decoration: underline; }
 .slot-orders .onum { font-size: .75rem; }
 .slot-free { margin: 6px 0 0; font-size: .85rem; }
+
+/* Pickup numbers */
+.onum.plain { background: #fff; color: var(--text); border: 2px solid var(--text); }
+.order-ref { font-weight: 500; color: var(--muted); margin-left: 4px; font-size: .8rem; }
+.slot-range { font-weight: 600; color: var(--muted); font-size: .82rem; margin-left: 4px; }
+.your-number .label { display: inline; font-size: inherit; font-weight: 600; color: inherit; }
+.your-number .label::before { content: none; }

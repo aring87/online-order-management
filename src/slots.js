@@ -9,7 +9,7 @@ const slotStart = (time, step) => hhmm(Math.floor(toMin(time) / step) * step);
 /** Every slot of the day with its order count. Cancelled orders don't count. */
 function slotsFor(db, date, { open, close, slot_minutes: step, slot_max: max }) {
   const orders = db.prepare(`
-    SELECT o.id, o.customer_id, o.pickup_time, o.status, o.source, o.payment_status, c.name AS customer_name,
+    SELECT o.id, o.slot_number, o.pickup_date, o.customer_id, o.pickup_time, o.status, o.source, o.payment_status, c.name AS customer_name,
            (SELECT COUNT(*) FROM order_items i WHERE i.order_id = o.id) AS item_count
     FROM orders o JOIN customers c ON c.id = o.customer_id
     WHERE o.pickup_date = ? AND o.status != 'cancelled'
@@ -26,6 +26,7 @@ function slotsFor(db, date, { open, close, slot_minutes: step, slot_max: max }) 
   }
   const list = [...slots.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([start, os]) => ({
     start,
+    numbers: numberRange(start),
     end: hhmm(toMin(start) + step),
     count: os.length,
     max,
@@ -44,4 +45,51 @@ function slotCount(db, date, time, step) {
     WHERE pickup_date = ? AND pickup_time >= ? AND pickup_time < ? AND status != 'cancelled'`).get(date, start, end).n;
 }
 
-module.exports = { slotsFor, slotCount, slotStart };
+// ---------- Pickup numbers ----------
+// Each pickup slot owns a block of numbers for the day: first slot #1-10, second #11-20, ...
+// (block size = the per-slot limit), so the number alone tells you when the order is due.
+let config = { open: '10:00', close: '18:00', slot_minutes: 30, slot_max: 10 };
+function configure(hours) { config = { ...config, ...hours }; }
+const blockSize = () => (config.slot_max > 0 ? config.slot_max : 10);
+
+/** 0 for the first slot of the day, 1 for the next…; null if the time is outside opening hours. */
+function slotIndex(time) {
+  const step = config.slot_minutes;
+  const start = toMin(slotStart(time, step));
+  const idx = (start - toMin(config.open)) / step;
+  if (idx < 0 || start + step > toMin(config.close)) return null;
+  return idx;
+}
+function numberRange(time) {
+  const idx = slotIndex(time);
+  if (idx == null) return null;
+  const first = idx * blockSize() + 1;
+  return { first, last: first + blockSize() - 1 };
+}
+
+/** Give an order the lowest free number in its slot's block (or none if the block is used up). */
+function assignSlotNumber(db, orderId) {
+  const o = db.prepare('SELECT id, pickup_date, pickup_time, status FROM orders WHERE id = ?').get(orderId);
+  let n = null;
+  const range = o && o.status !== 'cancelled' && o.pickup_date && o.pickup_time ? numberRange(o.pickup_time) : null;
+  if (range) {
+    const taken = new Set(db.prepare(`
+      SELECT slot_number FROM orders
+      WHERE pickup_date = ? AND slot_number BETWEEN ? AND ? AND status != 'cancelled' AND id != ?`)
+      .all(o.pickup_date, range.first, range.last, o.id).map((r) => r.slot_number));
+    for (let i = range.first; i <= range.last; i++) if (!taken.has(i)) { n = i; break; }
+  }
+  db.prepare('UPDATE orders SET slot_number = ? WHERE id = ?').run(n, orderId);
+  return n;
+}
+
+/** Number any orders that don't have a pickup number yet (e.g. after upgrading), oldest first. */
+function backfillSlotNumbers(db) {
+  const ids = db.prepare(`
+    SELECT id FROM orders WHERE slot_number IS NULL AND pickup_date IS NOT NULL AND pickup_time IS NOT NULL
+      AND status != 'cancelled' ORDER BY id`).all();
+  for (const { id } of ids) assignSlotNumber(db, id);
+  return ids.length;
+}
+
+module.exports = { slotsFor, slotCount, slotStart, configure, assignSlotNumber, backfillSlotNumbers, numberRange };

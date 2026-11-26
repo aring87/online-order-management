@@ -40,7 +40,8 @@ CREATE TABLE IF NOT EXISTS orders (
   order_ref           TEXT,                            -- order number from an imported spreadsheet
   import_key          TEXT UNIQUE,                     -- prevents importing the same order twice
   seen_at             TEXT,                            -- when staff first saw an online order (NULL = unread)
-  payment_status      TEXT                             -- 'paid' when paid online (Stripe); NULL = pay at pickup
+  payment_status      TEXT,                            -- 'paid' when paid online (Stripe); NULL = pay at pickup
+  slot_number         INTEGER                          -- pickup number for the day: slot 1 = #1-10, slot 2 = #11-20…
 );
 
 CREATE TABLE IF NOT EXISTS order_items (
@@ -149,6 +150,8 @@ function openDb(file) {
   ensureColumn(db, 'orders', 'seen_at', 'TEXT', 'UPDATE orders SET seen_at = created_at');  // existing orders count as seen
   ensureColumn(db, 'order_items', 'packed', 'INTEGER NOT NULL DEFAULT 0');
   ensureColumn(db, 'orders', 'payment_status', 'TEXT');
+  ensureColumn(db, 'orders', 'slot_number', 'INTEGER');
+  db.exec('CREATE INDEX IF NOT EXISTS idx_orders_slot ON orders(pickup_date, slot_number)');
 
   const { n } = db.prepare('SELECT COUNT(*) AS n FROM products').get();
   if (n === 0) {

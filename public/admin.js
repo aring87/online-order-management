@@ -13,13 +13,27 @@ const todayISO = () => { const d = new Date(); return new Date(d - d.getTimezone
 const SOURCES = { online: 'Online', manual: 'Entered by staff', import: 'Imported from Excel' };
 const clock = (t) => { if (!t) return ''; const [h, m] = t.split(':').map(Number); return new Date(2000, 0, 1, h, m).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }); };
 // The order number everyone uses ("number 47") — shown big on tickets and the prep board.
-const num = (o, size = '') => `<span class="onum ${size}" title="Order number">${o.id}</span>`;
+// The number staff call out. Orders with a pickup slot use their pickup number for that day
+// (slot 1 = #1-10, slot 2 = #11-20…); others use their permanent order number, shown with an outline.
+const pickupNo = (o) => (o.slot_number != null ? o.slot_number : o.id);
+const num = (o, size = '') => (o.slot_number != null
+  ? `<span class="onum ${size}" title="Pickup number for ${o.pickup_date ? day(o.pickup_date) : 'the day'} (order ${o.id})">${o.slot_number}</span>`
+  : `<span class="onum plain ${size}" title="Order number (no pickup number)">${o.id}</span>`);
+const orderRefTxt = (o) => (o.slot_number != null ? `Order ${o.id}` : '');
 // ---- Half-hour pickup slots ----
 let pickupHours = { open: '10:00', close: '18:00', slot_minutes: 30 };
 const toMin = (t) => Number(t.slice(0, 2)) * 60 + Number(t.slice(3, 5));
 const hhmm = (m) => `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
 // The slot a pickup time falls in: "10:47" → "10:30" (for 30-minute slots)
 const slotStart = (t) => (t ? hhmm(Math.floor(toMin(t) / pickupHours.slot_minutes) * pickupHours.slot_minutes) : null);
+// Pickup numbers belonging to a slot: first slot #1-10, second #11-20…
+function slotRange(start) {
+  if (!start) return '';
+  const idx = (toMin(start) - toMin(pickupHours.open)) / pickupHours.slot_minutes;
+  if (idx < 0 || toMin(start) + pickupHours.slot_minutes > toMin(pickupHours.close)) return '';
+  const size = pickupHours.slot_max > 0 ? pickupHours.slot_max : 10;
+  return `#${idx * size + 1}–${idx * size + size}`;
+}
 const slotLabel = (start) => (start ? `${clock(start)} – ${clock(hhmm(toMin(start) + pickupHours.slot_minutes))}` : 'No pickup time');
 function slotList() {
   const out = [];
@@ -187,6 +201,7 @@ function statusSelect(order) {
 
 function renderOrder(o) {
   const meta = [
+    orderRefTxt(o),
     `Ordered ${when(o.created_at)}`,
     o.pickup_date ? `${o.fulfillment === 'delivery' ? 'Delivery' : 'Pickup'} ${day(o.pickup_date)}${o.pickup_time ? ` ${clock(o.pickup_time)}` : ''}` : (o.fulfillment === 'delivery' ? 'Delivery' : ''),
     SOURCES[o.source] || '',
@@ -414,7 +429,8 @@ function withSlotRows(list, skip) {
     const s = slotStart(o.pickup_time) || 'none';
     if (s !== current) {
       current = s;
-      out.push({ slotRow: true, label: slotLabel(s === 'none' ? null : s), count: sorted.filter((x) => (slotStart(x.pickup_time) || 'none') === s).length });
+      const range = s !== 'none' && slotRange(s) ? ` · ${slotRange(s)}` : '';
+      out.push({ slotRow: true, label: slotLabel(s === 'none' ? null : s) + range, count: sorted.filter((x) => (slotStart(x.pickup_time) || 'none') === s).length });
     }
     out.push(o);
   }
@@ -506,7 +522,7 @@ async function loadSlots() {
     const pct = s.max ? Math.min(100, Math.round((s.count / s.max) * 100)) : 0;
     const level = s.full ? 'full' : pct >= 70 ? 'busy' : s.count ? 'some' : 'empty';
     return `<div class="slot-card ${level}">
-      <div class="slot-head"><b>${clock(s.start)} – ${clock(s.end)}</b>
+      <div class="slot-head"><b>${clock(s.start)} – ${clock(s.end)}${s.numbers ? ` <span class="slot-range">#${s.numbers.first}–${s.numbers.last}</span>` : ''}</b>
         <span class="slot-count">${s.count}${s.max ? ` / ${s.max}` : ''}${s.full ? ' · FULL' : ''}</span></div>
       ${s.max ? `<div class="slot-bar"><span style="width:${pct}%"></span></div>` : ''}
       ${s.orders.length ? `<ul class="slot-orders">${s.orders.map((o) => `<li><a href="#customer/${o.customer_id}">${num(o)} ${esc(o.customer_name)}</a>
@@ -958,7 +974,7 @@ function ticketCard(o, { online = false } = {}) {
         <a href="#customer/${o.customer_id}" class="name">${esc(o.customer_name)}</a>
         ${o.customer_phone ? `<a class="muted" href="tel:${esc(o.customer_phone)}">${esc(o.customer_phone)}</a>` : ''}
       </div>
-      <div class="due ${d.cls}">${esc(d.text)} ${paid(o)}</div>
+      <div class="due ${d.cls}">${esc(d.text)} ${paid(o)}${orderRefTxt(o) ? ` <span class="order-ref">${orderRefTxt(o)}</span>` : ''}</div>
     </header>
     ${online ? `<div class="muted small-meta">Ordered ${new Date(o.created_at.replace(' ', 'T') + 'Z').toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' })} · ${badge(o.status)}</div>` : ''}
     <ul class="checklist">${o.items.map((it) => itemLine(it, { checkable: !online })).join('')}</ul>
@@ -982,7 +998,8 @@ async function loadBoard() {
 }
 function renderBoard() {
   const q = $('#board-search').value.trim().toLowerCase();
-  const shown = boardOrders.filter((o) => !q || String(o.id) === q.replace('#', '') || o.customer_name.toLowerCase().includes(q));
+  const shown = boardOrders.filter((o) => !q || [String(o.id), String(o.slot_number)].includes(q.replace('#', ''))
+    || o.customer_name.toLowerCase().includes(q));
   for (const col of document.querySelectorAll('.board-col')) {
     const list = shown.filter((o) => o.status === col.dataset.status);
     col.querySelector('.col-count').textContent = list.length || '';
@@ -990,7 +1007,7 @@ function renderBoard() {
     let last = null;
     col.querySelector('.col-body').innerHTML = list.length ? list.map((o) => {
       const key = `${o.pickup_date || ''}|${slotStart(o.pickup_time) || ''}`;
-      const head = key !== last ? `<div class="slot-divider ${due(o).cls}">${esc(o.pickup_date ? due({ ...o, pickup_time: null }).text.replace(/^(Pickup|Deliver) /, '') : 'No pickup date')}${o.pickup_time ? ` · ${esc(slotLabel(slotStart(o.pickup_time)))}` : ''}</div>` : '';
+      const head = key !== last ? `<div class="slot-divider ${due(o).cls}">${esc(o.pickup_date ? due({ ...o, pickup_time: null }).text.replace(/^(Pickup|Deliver) /, '') : 'No pickup date')}${o.pickup_time ? ` · ${esc(slotLabel(slotStart(o.pickup_time)))}${slotRange(slotStart(o.pickup_time)) ? ` · ${slotRange(slotStart(o.pickup_time))}` : ''}` : ''}</div>` : '';
       last = key;
       return head + ticketCard(o);
     }).join('') : '<p class="muted col-empty">Nothing here</p>';
@@ -1022,7 +1039,7 @@ document.addEventListener('click', async (e) => {
   if (adv) {
     const o = boardOrders.find((x) => String(x.id) === adv.dataset.advance);
     const unpacked = o ? o.items.filter((i) => !i.packed).length : 0;
-    if (adv.dataset.to === 'ready' && unpacked && !confirm(`${unpacked} item(s) on order ${adv.dataset.advance} aren't ticked yet. Mark it ready anyway?`)) return;
+    if (adv.dataset.to === 'ready' && unpacked && !confirm(`${unpacked} item(s) on order ${pickupNo(o || { id: adv.dataset.advance })} aren't ticked yet. Mark it ready anyway?`)) return;
     adv.disabled = true;
     try {
       await api(`/api/admin/orders/${adv.dataset.advance}`, jsonOpts('PATCH', { status: adv.dataset.to }));
@@ -1101,7 +1118,7 @@ async function printTicket(id) {
   $('#print-area').innerHTML = `
     <div class="pt">
       <div class="pt-top">
-        <div class="pt-num"><small>ORDER</small>${o.id}</div>
+        <div class="pt-num"><small>${o.slot_number != null ? 'PICKUP #' : 'ORDER'}</small>${pickupNo(o)}</div>
         <div class="pt-who">
           <div class="pt-name">${esc(o.customer_name)}</div>
           ${o.customer_phone ? `<div>${esc(o.customer_phone)}</div>` : ''}
@@ -1117,7 +1134,7 @@ async function printTicket(id) {
       ${o.delivery_address ? `<p><b>Deliver to:</b> ${esc(o.delivery_address)}</p>` : ''}
       <div class="pt-foot">
         <span>${o.items.length} item${o.items.length === 1 ? '' : 's'} · ${o.payment_status === 'paid' ? 'paid' : 'est.'} ${money(o.total_cents)}</span>
-        <span>Ordered ${when(o.created_at)}</span>
+        <span>${o.slot_number != null ? `Order ${o.id} · ` : ''}Ordered ${when(o.created_at)}</span>
       </div>
     </div>`;
   window.print();
@@ -1204,7 +1221,8 @@ function chime() {
 let toastTimer;
 function announce(evt) {
   if (alertsOn()) chime();
-  const text = `New online order #${evt.id} from ${evt.name} · ${money(evt.total_cents)}`;
+  const no = evt.slot_number != null ? `#${evt.slot_number}${evt.pickup_date ? ` (${day(evt.pickup_date)})` : ''}` : `#${evt.id}`;
+  const text = `New online order ${no} from ${evt.name} · ${money(evt.total_cents)}`;
   const t = $('#toast');
   t.innerHTML = `<b>🛒 ${esc(text)}</b><a href="#online">View</a>`;
   t.classList.remove('hidden');

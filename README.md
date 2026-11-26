@@ -61,6 +61,12 @@ Customers, and staff entering phone orders, pick a **half-hour pickup slot**, su
 
 Orders with other times, from imports or Stripe, go into the slot they fall in (10:47 → 10:30–11:00).
 
+**Pickup numbers by slot:** every order with a pickup time gets a **pickup number** for its day from its slot's block. The first slot (10:00–10:30) uses **#1–10**, the second (10:30–11:00) **#11–20**, the third **#21–30**, and so on. So the number alone tells you when an order is due: #23 means the 11:00 slot.
+- **Where it shows:** it's the big number on the prep board, tickets, printouts and the customer's confirmation ("Your pickup number 12"). The permanent order number is shown small, e.g. "Order 1047".
+- **Each day:** numbers start again, so the pickup day is always shown alongside.
+- **Cancelling** an order frees its number for the next order in that slot.
+- **Orders without a pickup number** keep their permanent order number, shown with an outline instead of a solid box. That covers orders with no time set, a time outside opening hours, or an 11th order squeezed into a full slot.
+
 **🕐 Slots tab:** pick a day (◀ ▶, Today, Tomorrow) to see every slot with a fill bar ("8 / 10"), the orders in it by number and name, and full slots in red.
 
 **At most 10 orders per slot** for online orders:

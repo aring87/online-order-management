@@ -86,7 +86,9 @@ $('#order-form').addEventListener('submit', async (e) => {
     });
     const data = await res.json();
     if (!res.ok) { refreshSlots(); return showError(data.error || 'Could not place order.'); }
-    $('#done-number').textContent = data.id;
+    // Pickup number (by time slot) when there is one, otherwise the order number.
+    $('#done-number').textContent = data.slot_number ?? data.id;
+    $('#done-number-label').textContent = data.slot_number != null ? 'Your pickup number' : 'Your order number';
     $('#done-msg').textContent = `${data.items.length} item(s) · estimated ${money(data.total_cents)}. We'll contact you at ${payload.email} if we have any questions.`;
     saveDetails();
     f.classList.add('hidden');

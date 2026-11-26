@@ -9,7 +9,7 @@ const { findOrCreateCustomer, insertOrder, getOrderWithItems, listOrdersWithItem
 const { readSpreadsheet, importRows, FIELDS, ImportError } = require('./importer');
 const { createStripe } = require('./stripe');
 const { itemTotals } = require('./reports');
-const { slotsFor, slotCount } = require('./slots');
+const { slotsFor, slotCount, configure: configureSlots, assignSlotNumber, backfillSlotNumbers } = require('./slots');
 
 const STATUSES = ['new', 'preparing', 'ready', 'picked_up', 'cancelled'];
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -191,6 +191,8 @@ function createApp(db, {
     slot_max: Number.isInteger(Number(pickup.slotMax)) && Number(pickup.slotMax) >= 0 && pickup.slotMax !== '' && pickup.slotMax != null
       ? Number(pickup.slotMax) : 10,
   };
+  configureSlots(pickupHours);
+  backfillSlotNumbers(db);
   const app = express();
   const smallJson = express.json({ limit: '100kb' });
   // Spreadsheet imports can be large; they get their own body parsers after the login check.
@@ -204,7 +206,8 @@ function createApp(db, {
   const changed = (type, data = {}) => events.emit('change', { type, ...data });
 
   // Paid Stripe orders flow in as online orders (see src/stripe.js).
-  const stripe = createStripe({ db, ...stripeOpts, onOrder: (e) => changed('online-order', e) });
+  const pickupNumber = (id) => db.prepare('SELECT slot_number, pickup_date FROM orders WHERE id = ?').get(id) || {};
+  const stripe = createStripe({ db, ...stripeOpts, onOrder: (e) => changed('online-order', { ...e, ...pickupNumber(e.id) }) });
   app.locals.stripe = stripe;
   app.post('/api/stripe/webhook', express.raw({ type: () => true, limit: '1mb' }), stripe.webhook);
 
@@ -256,7 +259,8 @@ function createApp(db, {
       });
       return getOrderWithItems(db, orderId);
     });
-    changed('online-order', { id: order.id, name: order.customer_name, total_cents: order.total_cents });
+    changed('online-order', { id: order.id, name: order.customer_name, total_cents: order.total_cents,
+      slot_number: order.slot_number, pickup_date: order.pickup_date });
     res.status(201).json(order);
   });
 
@@ -366,9 +370,9 @@ function createApp(db, {
     const term = str(req.query.q, 100);
     if (term) {
       const q = `%${term}%`;
-      where.push(`(c.name LIKE ? OR c.email LIKE ? OR c.phone LIKE ? OR o.order_ref LIKE ? OR CAST(o.id AS TEXT) = ?
+      where.push(`(c.name LIKE ? OR c.email LIKE ? OR c.phone LIKE ? OR o.order_ref LIKE ? OR CAST(o.id AS TEXT) = ? OR CAST(o.slot_number AS TEXT) = ?
                    OR EXISTS (SELECT 1 FROM order_items i WHERE i.order_id = o.id AND (i.product_name LIKE ? OR i.cut_instructions LIKE ?)))`);
-      params.push(q, q, q, q, term.replace(/^#/, ''), q, q);
+      params.push(q, q, q, q, term.replace(/^#/, ''), term.replace(/^#/, ''), q, q);
     }
     res.json(listOrdersWithItems(db, where.join(' AND '), params,
       'o.pickup_date IS NULL, o.pickup_date, o.pickup_time IS NULL, o.pickup_time, o.created_at DESC, o.id DESC', 3000));
@@ -527,6 +531,9 @@ function createApp(db, {
     if (!STATUSES.includes(status)) return res.status(400).json({ error: 'Invalid status' });
     const result = db.prepare('UPDATE orders SET status = ? WHERE id = ?').run(status, Number(req.params.id));
     if (result.changes === 0) return res.status(404).json({ error: 'Order not found' });
+    // Cancelling frees the pickup number; un-cancelling gives it one again.
+    const cur = db.prepare('SELECT slot_number FROM orders WHERE id = ?').get(Number(req.params.id));
+    if (status === 'cancelled' || cur.slot_number == null) assignSlotNumber(db, Number(req.params.id));
     changed('order', { id: Number(req.params.id) });
     res.json(getOrderWithItems(db, Number(req.params.id)));
   });

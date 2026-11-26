@@ -227,3 +227,32 @@ test('slots: counts per slot and 10-per-slot limit for online orders (staff can 
   assert.equal(admin.slots.find((s) => s.start === '10:00').orders.length, 11);
   assert.equal(admin.total, 12);
 }));
+
+test('pickup numbers: slot 1 = #1-10, slot 2 = #11-20, per day; cancelling frees a number', () => withServer(async (req) => {
+  const mk = async (date, time, name = 'X') => (await req('/api/admin/orders', { method: 'POST',
+    body: { name, pickup_date: date, pickup_time: time, items: [{ name: 'Bacon', quantity: 1 }] } })).data;
+  const d1 = '2026-12-10';
+  const a = await mk(d1, '10:00');          // first slot (10:00-10:30)
+  const b = await mk(d1, '10:15');
+  const c = await mk(d1, '10:30');          // second slot
+  const d = await mk(d1, '17:30');          // last slot of the day (16th) → #151
+  assert.deepEqual([a.slot_number, b.slot_number, c.slot_number, d.slot_number], [1, 2, 11, 151]);
+  const next = await mk('2026-12-11', '10:00');
+  assert.equal(next.slot_number, 1, 'numbers start again each day');
+  assert.equal((await mk(d1, '09:00')).slot_number, null, 'outside opening hours: no pickup number');
+  assert.equal((await mk(d1)).slot_number ?? null, null, 'no pickup time: no pickup number');
+
+  await req(`/api/admin/orders/${a.id}`, { method: 'PATCH', body: { status: 'cancelled' } });
+  assert.equal((await mk(d1, '10:20')).slot_number, 1, 'a cancelled order frees its number');
+  for (let i = 0; i < 8; i++) await mk(d1, '10:05');      // fills #3-#10
+  const extra = await mk(d1, '10:10');                     // 11th in the slot: staff override
+  assert.equal(extra.slot_number, null, 'no number left in the block: keeps its order number');
+  const reopen = (await req(`/api/admin/orders/${a.id}`, { method: 'PATCH', body: { status: 'new' } })).data;
+  assert.equal(reopen.slot_number, null, 'block is full, so the un-cancelled order has no pickup number');
+
+  const { data: slots } = await req(`/api/admin/slots?date=${d1}`);
+  assert.deepEqual(slots.slots.find((s) => s.start === '10:30').numbers, { first: 11, last: 20 });
+  assert.equal(slots.slots.find((s) => s.start === '09:00').numbers, null);
+  const { data: found } = await req(`/api/admin/orders/browse?show=all&q=%23151`);
+  assert.ok(found.some((o) => o.id === d.id), 'search by pickup number');
+}));
