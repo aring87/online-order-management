@@ -121,7 +121,28 @@ async function route({ quiet = false } = {}) {
     else if (h.startsWith('new')) { show('new'); if (!quiet) startNewOrder(new URLSearchParams(h.split('?')[1]).get('customer')); }
     else if (h === 'import') { show('import'); }
     else { location.hash = ''; }
-  } catch (err) { if (!(err instanceof AuthError)) console.error(err); }
+    showLoadError('');
+  } catch (err) {
+    if (err instanceof AuthError) return;
+    console.error(err);
+    showLoadError(err.message);
+  }
+}
+// Never leave a screen silently blank: say what went wrong and the usual fix.
+function showLoadError(msg) {
+  let box = $('#load-error');
+  if (!box) {
+    box = document.createElement('div');
+    box.id = 'load-error';
+    box.className = 'error load-error';
+    $('#app').prepend(box);
+  }
+  box.classList.toggle('hidden', !msg);
+  if (msg) {
+    box.innerHTML = `<b>This screen couldn't load</b> (${esc(msg)}).
+      If you just updated the program, it needs a restart: Start menu → <b>Stop Butcher Shop Orders</b>
+      (or close the black window), then open it again.`;
+  }
 }
 window.addEventListener('hashchange', () => route());
 $('#refresh').addEventListener('click', () => route({ quiet: true }));
