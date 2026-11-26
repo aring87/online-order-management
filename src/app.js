@@ -175,7 +175,18 @@ function csvCell(v) {
   return /[",\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
 }
 
-function createApp(db, { adminPassword, sessionSecret = crypto.randomBytes(32).toString('hex'), stripe: stripeOpts = {} }) {
+const HHMM = /^([01]\d|2[0-3]):[0-5]\d$/;
+
+function createApp(db, {
+  adminPassword, sessionSecret = crypto.randomBytes(32).toString('hex'), stripe: stripeOpts = {},
+  pickup = {},
+}) {
+  // Pickup hours for the half-hour time slots offered on the order forms.
+  const pickupHours = {
+    open: HHMM.test(pickup.open) ? pickup.open : '10:00',
+    close: HHMM.test(pickup.close) ? pickup.close : '18:00',
+    slot_minutes: [15, 20, 30, 60].includes(Number(pickup.slotMinutes)) ? Number(pickup.slotMinutes) : 30,
+  };
   const app = express();
   const smallJson = express.json({ limit: '100kb' });
   // Spreadsheet imports can be large; they get their own body parsers after the login check.
@@ -201,6 +212,8 @@ function createApp(db, { adminPassword, sessionSecret = crypto.randomBytes(32).t
   const cookieOpts = (req) => `Path=/; HttpOnly; SameSite=Lax${req.secure ? '; Secure' : ''}`;
 
   // ---------- Public ----------
+  app.get('/api/settings', (req, res) => res.json({ pickup: pickupHours }));
+
   app.get('/api/products', (req, res) => {
     res.json(db.prepare('SELECT id, name, category, unit, price_cents FROM products WHERE active = 1 ORDER BY category, name').all());
   });
@@ -308,6 +321,9 @@ function createApp(db, { adminPassword, sessionSecret = crypto.randomBytes(32).t
       to: isDate(req.query.to),
       show: ['open', 'done'].includes(req.query.show) ? req.query.show : 'all',
       source: ['online', 'store', 'manual', 'import'].includes(req.query.source) ? req.query.source : '',
+      timeFrom: HHMM.test(req.query.time_from) ? req.query.time_from : undefined,
+      timeTo: HHMM.test(req.query.time_to) || req.query.time_to === '24:00' ? req.query.time_to : undefined,
+      noTime: req.query.notime === '1',
     }));
   });
 

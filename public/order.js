@@ -131,6 +131,18 @@ function restoreDetails() {
 const today = new Date();
 $('#pickup_date').min = new Date(today.getTime() - today.getTimezoneOffset() * 60000).toISOString().slice(0, 10);
 
+// Half-hour pickup slots within opening hours (set in the program's .env file).
+function slotOptions({ open = '10:00', close = '18:00', slot_minutes: step = 30 } = {}) {
+  const toMin = (t) => Number(t.slice(0, 2)) * 60 + Number(t.slice(3, 5));
+  const hhmm = (m) => `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
+  const nice = (m) => new Date(2000, 0, 1, Math.floor(m / 60), m % 60).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+  const out = [];
+  for (let m = toMin(open); m + step <= toMin(close); m += step) out.push(`<option value="${hhmm(m)}">${nice(m)} – ${nice(m + step)}</option>`);
+  return out.join('');
+}
+fetch('/api/settings').then((r) => r.json()).then((s) => { $('#pickup_time').innerHTML += slotOptions(s.pickup); })
+  .catch(() => { $('#pickup_time').innerHTML += slotOptions(); });
+
 restoreDetails();
 loadProducts().catch(() => {
   $('#products').textContent = navigator.onLine === false

@@ -169,6 +169,7 @@
           <span id="t-custom" class="t-custom hidden">
             <input type="date" id="t-from" aria-label="From"> to <input type="date" id="t-to" aria-label="To">
           </span>
+          <select id="t-slot" aria-label="Pickup time slot"><option value="">All day</option></select>
           <select id="t-source" aria-label="Which orders">
             <option value="online">Online orders only</option>
             <option value="">All orders (online + in-store)</option>
@@ -212,7 +213,7 @@
           <div class="grid">
             <div class="field"><label for="n-date">Order date</label><input id="n-date" type="date"></div>
             <div class="field"><label for="n-pickup">Pickup / delivery date</label><input id="n-pickup" type="date"></div>
-            <div class="field"><label for="n-time">Ready by (time)</label><input id="n-time" type="time" step="900"></div>
+            <div class="field"><label for="n-time">Pickup time</label><select id="n-time"><option value="">Any time</option></select></div>
             <div class="field"><label for="n-fulfillment">Pickup or delivery</label>
               <select id="n-fulfillment"><option value="pickup">Pickup</option><option value="delivery">Delivery</option></select></div>
             <div class="field"><label for="n-status">Status</label><select id="n-status"></select></div>

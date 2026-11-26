@@ -178,3 +178,23 @@ test('item totals: per item and per cut, filtered by pickup/order date and sourc
   const allTime = await get('basis=order');
   assert.equal(allTime.items.find((i) => i.name === 'Ribeye Steak').lb, 20.5);
 }));
+
+test('pickup slots: settings and item totals for one half-hour slot', async () => {
+  const db = openDb(':memory:');
+  const server = createApp(db, { adminPassword: null, pickup: { open: '09:00', close: '17:00' } }).listen(0, '127.0.0.1');
+  await new Promise((r) => server.once('listening', r));
+  const base = `http://127.0.0.1:${server.address().port}`;
+  const post = (body) => fetch(base + '/api/admin/orders', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+  try {
+    assert.deepEqual((await (await fetch(base + '/api/settings')).json()).pickup, { open: '09:00', close: '17:00', slot_minutes: 30 });
+    await post({ name: 'A', pickup_date: '2026-12-01', pickup_time: '10:00', items: [{ name: 'Brisket', quantity: 5, unit: 'lb' }] });
+    await post({ name: 'B', pickup_date: '2026-12-01', pickup_time: '10:20', items: [{ name: 'Brisket', quantity: 3, unit: 'lb' }] });
+    await post({ name: 'C', pickup_date: '2026-12-01', pickup_time: '10:30', items: [{ name: 'Brisket', quantity: 7, unit: 'lb' }] });
+    await post({ name: 'D', pickup_date: '2026-12-01', items: [{ name: 'Brisket', quantity: 1, unit: 'lb' }] });
+    const get = async (qs) => (await (await fetch(`${base}/api/admin/reports/items?basis=pickup&from=2026-12-01&to=2026-12-01&${qs}`)).json());
+    assert.equal((await get('time_from=10:00&time_to=10:30')).items[0].lb, 8, '10:00 and 10:20 are in the 10:00 slot; 10:30 is not');
+    assert.equal((await get('time_from=10:30&time_to=11:00')).items[0].lb, 7);
+    assert.equal((await get('notime=1')).items[0].lb, 1);
+    assert.equal((await get('')).items[0].lb, 16);
+  } finally { server.closeAllConnections(); server.close(); }
+});

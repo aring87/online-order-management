@@ -14,6 +14,26 @@ const SOURCES = { online: 'Online', manual: 'Entered by staff', import: 'Importe
 const clock = (t) => { if (!t) return ''; const [h, m] = t.split(':').map(Number); return new Date(2000, 0, 1, h, m).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }); };
 // The order number everyone uses ("number 47") — shown big on tickets and the prep board.
 const num = (o, size = '') => `<span class="onum ${size}" title="Order number">${o.id}</span>`;
+// ---- Half-hour pickup slots ----
+let pickupHours = { open: '10:00', close: '18:00', slot_minutes: 30 };
+const toMin = (t) => Number(t.slice(0, 2)) * 60 + Number(t.slice(3, 5));
+const hhmm = (m) => `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
+// The slot a pickup time falls in: "10:47" → "10:30" (for 30-minute slots)
+const slotStart = (t) => (t ? hhmm(Math.floor(toMin(t) / pickupHours.slot_minutes) * pickupHours.slot_minutes) : null);
+const slotLabel = (start) => (start ? `${clock(start)} – ${clock(hhmm(toMin(start) + pickupHours.slot_minutes))}` : 'No pickup time');
+function slotList() {
+  const out = [];
+  for (let m = toMin(pickupHours.open); m + pickupHours.slot_minutes <= toMin(pickupHours.close); m += pickupHours.slot_minutes) out.push(hhmm(m));
+  return out;
+}
+function fillSlotSelects() {
+  const opts = slotList().map((s) => `<option value="${s}">${slotLabel(s)}</option>`).join('');
+  $('#n-time').innerHTML = `<option value="">Any time</option>${opts}`;
+  $('#t-slot').innerHTML = `<option value="">All day</option>${opts}<option value="none">No pickup time set</option>`;
+}
+fillSlotSelects();
+fetch('/api/settings').then((r) => r.json()).then((s) => { if (s.pickup) { pickupHours = s.pickup; fillSlotSelects(); } }).catch(() => {});
+
 // "Today 3:30 PM", "Tomorrow", "Tue, Dec 1" — with overdue / today highlighting.
 function due(o) {
   if (!o.pickup_date) return { text: o.fulfillment === 'delivery' ? 'Delivery — no date' : 'No pickup date', cls: 'none' };
@@ -362,6 +382,23 @@ function dayKey(o) {
   return { key: o.pickup_date, label: prefix + label, cls: o.pickup_date === t ? 'today' : '' };
 }
 
+// Sort a day's orders by pickup time and put a heading row before each half-hour slot.
+function withSlotRows(list, skip) {
+  const sorted = [...list].sort((a, b) => (a.pickup_time || '99') .localeCompare(b.pickup_time || '99') || a.id - b.id);
+  if (skip) return sorted;
+  const out = [];
+  let current;
+  for (const o of sorted) {
+    const s = slotStart(o.pickup_time) || 'none';
+    if (s !== current) {
+      current = s;
+      out.push({ slotRow: true, label: slotLabel(s === 'none' ? null : s), count: sorted.filter((x) => (slotStart(x.pickup_time) || 'none') === s).length });
+    }
+    out.push(o);
+  }
+  return out;
+}
+
 function renderByDay(orders, print) {
   const groups = new Map();
   for (const o of orders) {
@@ -372,7 +409,7 @@ function renderByDay(orders, print) {
   return [...groups.values()].sort((a, b) => a.key.localeCompare(b.key)).map((g) => groupHtml(
     `<span class="${g.cls || ''}">${esc(g.label)}</span>`,
     `${g.list.length} order${g.list.length === 1 ? '' : 's'}`,
-    `<table class="stack gtable"><tbody>${g.list.map((o) => `<tr>
+    `<table class="stack gtable"><tbody>${withSlotRows(g.list, g.key === '0000').map((o) => o.slotRow ? `<tr class="slot-row"><td colspan="6">🕐 ${esc(o.label)} <span class="muted">· ${o.count} order${o.count === 1 ? '' : 's'}</span></td></tr>` : `<tr>
       <td class="primary w-num">${num(o)}</td>
       <td data-label="Time" class="w-time">${o.pickup_time ? clock(o.pickup_time) : '<span class="muted">—</span>'}${g.key === '0000' ? `<div class="muted">${new Date(o.pickup_date + 'T00:00').toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' })}</div>` : ''}</td>
       <td data-label="Customer" class="w-cust">${custLink(o, print)}${o.customer_phone ? `<div class="muted">${esc(o.customer_phone)}</div>` : ''}</td>
@@ -467,6 +504,7 @@ function setMode(mode) {
   const saved = tPrefs[`range_${mode}`];
   $('#t-range').value = RANGES[mode].some(([k]) => k === saved) ? saved : RANGES[mode][0][0];
   $('#t-show').value = tPrefs[`show_${mode}`] || 'all';
+  $('#t-slot').classList.toggle('hidden', mode !== 'prep');
   updateCustom();
 }
 function updateCustom() {
@@ -486,6 +524,7 @@ $('#t-mode').addEventListener('click', (e) => {
 });
 $('#t-range').addEventListener('change', () => { tPrefs[`range_${tPrefs.mode}`] = $('#t-range').value; saveT(); updateCustom(); loadTotals().catch(() => {}); });
 $('#t-show').addEventListener('change', () => { tPrefs[`show_${tPrefs.mode}`] = $('#t-show').value; saveT(); loadTotals().catch(() => {}); });
+$('#t-slot').addEventListener('change', () => loadTotals().catch(() => {}));
 $('#t-source').addEventListener('change', () => { tPrefs.source = $('#t-source').value; saveT(); loadTotals().catch(() => {}); });
 for (const id of ['#t-from', '#t-to']) $(id).addEventListener('change', () => loadTotals().catch(() => {}));
 
@@ -496,7 +535,8 @@ function totalsTitle() {
   const what = tPrefs.mode === 'prep' ? 'Prep list' : 'Sold';
   const when = !from && !to ? 'all time' : from === to ? (tPrefs.mode === 'prep' ? `pickup ${dLong(from)}` : dLong(from))
     : `${tPrefs.mode === 'prep' ? 'pickup ' : ''}${day(from)} – ${day(to)}`;
-  return `${what} · ${when} · ${$('#t-source').selectedOptions[0].text}${$('#t-show').value !== 'all' ? ` · ${$('#t-show').selectedOptions[0].text}` : ''}`;
+  const slot = tPrefs.mode === 'prep' && $('#t-slot').value ? ` · ${$('#t-slot').selectedOptions[0].text}` : '';
+  return `${what} · ${when}${slot} · ${$('#t-source').selectedOptions[0].text}${$('#t-show').value !== 'all' ? ` · ${$('#t-show').selectedOptions[0].text}` : ''}`;
 }
 
 async function loadTotals() {
@@ -505,6 +545,9 @@ async function loadTotals() {
   if (from) p.set('from', from);
   if (to) p.set('to', to);
   if ($('#t-source').value) p.set('source', $('#t-source').value);
+  const slot = tPrefs.mode === 'prep' ? $('#t-slot').value : '';
+  if (slot === 'none') p.set('notime', '1');
+  else if (slot) { p.set('time_from', slot); p.set('time_to', hhmm(toMin(slot) + pickupHours.slot_minutes)); }
   totalsData = await api(`/api/admin/reports/items?${p}`);
   renderTotals();
 }
@@ -862,7 +905,14 @@ function renderBoard() {
   for (const col of document.querySelectorAll('.board-col')) {
     const list = shown.filter((o) => o.status === col.dataset.status);
     col.querySelector('.col-count').textContent = list.length || '';
-    col.querySelector('.col-body').innerHTML = list.length ? list.map((o) => ticketCard(o)).join('') : '<p class="muted col-empty">Nothing here</p>';
+    // A small heading whenever the pickup day or half-hour slot changes.
+    let last = null;
+    col.querySelector('.col-body').innerHTML = list.length ? list.map((o) => {
+      const key = `${o.pickup_date || ''}|${slotStart(o.pickup_time) || ''}`;
+      const head = key !== last ? `<div class="slot-divider ${due(o).cls}">${esc(o.pickup_date ? due({ ...o, pickup_time: null }).text.replace(/^(Pickup|Deliver) /, '') : 'No pickup date')}${o.pickup_time ? ` · ${esc(slotLabel(slotStart(o.pickup_time)))}` : ''}</div>` : '';
+      last = key;
+      return head + ticketCard(o);
+    }).join('') : '<p class="muted col-empty">Nothing here</p>';
   }
 }
 $('#board-search').addEventListener('input', renderBoard);

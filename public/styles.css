@@ -490,3 +490,12 @@ table.gtable.flat tr:last-child td { border-bottom: 1px solid var(--border); }
   .pl .t-cut td { background: none !important; }
   .pl .t-check { font-size: 14pt; }
 }
+
+/* Half-hour pickup slots */
+tr.slot-row td { background: #f1ebe5; font-weight: 700; font-size: .88rem; padding: 5px 12px !important; color: var(--text); }
+.slot-divider { font-size: .8rem; font-weight: 700; color: var(--muted); margin: 10px 4px 6px; text-transform: uppercase; letter-spacing: .03em; }
+.slot-divider:first-child { margin-top: 0; }
+.slot-divider.today { color: #b25e00; }
+.slot-divider.late { color: var(--accent); }
+@media (max-width: 700px) { table.stack tr.slot-row { border: 0; padding: 0; margin: 6px 0 2px; background: none; } table.stack tr.slot-row td { display: block; text-align: left; } table.stack tr.slot-row td::before { content: none; } }
+@media print { .pl tr.slot-row td { background: #eee !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; } }

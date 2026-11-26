@@ -52,6 +52,17 @@ The program opens straight to the orders. There's no login screen while no passw
 
 Double-click **`start-windows.bat`** (Windows) or **`start-mac.command`** (Mac). Keep the black window open while you use the program; closing it stops the program. On a Mac, the first time, right-click `start-mac.command` and choose **Open**.
 
+## Half-hour pickup slots
+
+Customers, and staff entering phone orders, pick a **half-hour pickup slot**, such as "10:30 AM – 11:00 AM", from a list within opening hours. Orders are then organized by slot:
+- **Prep board:** a heading for each day and slot between the tickets, e.g. *TOMORROW · 10:30 AM – 11:00 AM*.
+- **Orders → 📅 Pickup day:** each day split into slots, with the number of orders in each.
+- **📊 Item totals → Prep list:** choose a **time slot** to see what needs cutting for just those pickups.
+
+Orders with other times, from imports or Stripe, go into the slot they fall in (10:47 → 10:30–11:00).
+
+**Opening hours** default to 10:00 AM – 6:00 PM. Change them in `.env` with `PICKUP_OPEN=10:00` and `PICKUP_CLOSE=18:00` (24-hour clock), then restart the program. The same hours apply every day.
+
 ## Importing the Excel spreadsheet
 
 1. Click **Import from Excel** and choose the file. Old `.xls` files must be re-saved as `.xlsx` first (File → Save As → Excel Workbook).

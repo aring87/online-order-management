@@ -26,11 +26,15 @@ const cleanCut = (cut) => String(cut || '').replace(/\s+/g, ' ').trim();
  * @param show  'all' (everything except cancelled), 'open' (not picked up yet), 'done' (picked up)
  * @param source '' (all), 'online', 'store' (staff-entered + imported), 'manual', 'import'
  */
-function itemTotals(db, { basis = 'pickup', from, to, show = 'all', source = '' } = {}) {
+function itemTotals(db, { basis = 'pickup', from, to, show = 'all', source = '', timeFrom, timeTo, noTime = false } = {}) {
   const where = ["o.status != 'cancelled'"];
   const params = [];
   const dateCol = basis === 'order' ? "date(o.created_at, 'localtime')" : 'o.pickup_date';
   if (from) { where.push(`${dateCol} >= ?`); params.push(from); }
+  // Pickup time slot, e.g. 10:00 up to (not including) 10:30; or orders with no pickup time.
+  if (noTime) where.push('o.pickup_time IS NULL');
+  if (timeFrom) { where.push('o.pickup_time >= ?'); params.push(timeFrom); }
+  if (timeTo) { where.push('o.pickup_time < ?'); params.push(timeTo); }
   if (to) { where.push(`${dateCol} <= ?`); params.push(to); }
   if (show === 'open') where.push("o.status IN ('new', 'preparing', 'ready')");
   if (show === 'done') where.push("o.status = 'picked_up'");

@@ -55,7 +55,7 @@ const CUTS = {
 };
 const NOTES = ['', '', '', 'Please call when ready', 'Picking up on my lunch break', 'For a birthday dinner',
   'Can you vacuum seal?', 'First time ordering online!'];
-const TIMES = ['09:30', '10:00', '11:00', '12:00', '12:30', '14:00', '15:00', '16:00', '16:30', '17:00'];
+const TIMES = ['10:00', '10:30', '11:00', '12:00', '12:30', '14:00', '15:00', '15:30', '16:00', '17:00', '17:30'];
 
 const pick = (a) => a[Math.floor(Math.random() * a.length)];
 const between = (a, b) => a + Math.floor(Math.random() * (b - a + 1));
