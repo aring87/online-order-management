@@ -43,6 +43,7 @@
         <button data-view="online">Online orders <span class="count alert" id="count-online"></span></button>
         <button data-view="customers">Customers</button>
         <button data-view="orders">Orders</button>
+        <button data-view="slots">🕐 Slots</button>
         <button data-view="totals">📊 Item totals</button>
         <button data-view="new">＋ New order</button>
         <button data-view="import">Import from Excel</button>
@@ -153,6 +154,24 @@
         <p id="orders-summary" class="muted orders-summary"></p>
         <div id="orders-out"></div>
         <p id="orders-empty" class="muted empty hidden">No orders match these filters.</p>
+      </section>
+
+      <!-- Pickup slots: how many orders in each half-hour slot -->
+      <section id="view-slots" class="card hidden">
+        <div class="section-head">
+          <h2>Pickup slots</h2>
+          <div class="filters day-nav">
+            <button type="button" class="secondary" id="sl-prev" aria-label="Previous day">◀</button>
+            <input type="date" id="sl-date" aria-label="Day">
+            <button type="button" class="secondary" id="sl-next" aria-label="Next day">▶</button>
+            <button type="button" class="secondary" id="sl-today">Today</button>
+            <button type="button" class="secondary" id="sl-tomorrow">Tomorrow</button>
+          </div>
+        </div>
+        <p id="sl-title" class="t-title"></p>
+        <div id="sl-stats" class="stats t-stats"></div>
+        <div id="sl-grid" class="slot-grid"></div>
+        <div id="sl-notime"></div>
       </section>
 
       <!-- Item totals: prep list (by pickup day) and sales (by order date) -->

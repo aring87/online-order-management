@@ -499,3 +499,25 @@ tr.slot-row td { background: #f1ebe5; font-weight: 700; font-size: .88rem; paddi
 .slot-divider.late { color: var(--accent); }
 @media (max-width: 700px) { table.stack tr.slot-row { border: 0; padding: 0; margin: 6px 0 2px; background: none; } table.stack tr.slot-row td { display: block; text-align: left; } table.stack tr.slot-row td::before { content: none; } }
 @media print { .pl tr.slot-row td { background: #eee !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; } }
+
+/* ---------- Pickup slots ---------- */
+.day-nav input[type=date] { width: auto; }
+.slot-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 12px; margin-bottom: 16px; }
+.slot-card { border: 1px solid var(--border); border-left: 5px solid #ddd; border-radius: 10px; padding: 10px 12px; background: #fff; }
+.slot-card.some { border-left-color: #3f9b5c; }
+.slot-card.busy { border-left-color: #e8a317; }
+.slot-card.full { border-left-color: var(--accent); background: #fdf3f3; }
+.slot-card.empty { opacity: .75; }
+.slot-head { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
+.slot-count { font-weight: 800; font-variant-numeric: tabular-nums; }
+.slot-card.full .slot-count { color: var(--accent); }
+.slot-bar { height: 7px; border-radius: 99px; background: #eee; overflow: hidden; margin: 8px 0 6px; }
+.slot-bar span { display: block; height: 100%; background: #3f9b5c; }
+.slot-card.busy .slot-bar span { background: #e8a317; }
+.slot-card.full .slot-bar span { background: var(--accent); }
+.slot-orders { list-style: none; margin: 4px 0 0; padding: 0; font-size: .88rem; }
+.slot-orders li { padding: 3px 0; display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+.slot-orders a { color: var(--text); text-decoration: none; font-weight: 600; }
+.slot-orders a:hover { text-decoration: underline; }
+.slot-orders .onum { font-size: .75rem; }
+.slot-free { margin: 6px 0 0; font-size: .85rem; }

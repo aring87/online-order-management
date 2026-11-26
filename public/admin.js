@@ -92,7 +92,7 @@ $('#logout').addEventListener('click', async () => {
 });
 
 // ================= Views & routing =================
-const VIEWS = ['board', 'online', 'customers', 'orders', 'totals', 'new', 'import'];
+const VIEWS = ['board', 'online', 'customers', 'orders', 'slots', 'totals', 'new', 'import'];
 function show(view) {
   for (const v of VIEWS) $(`#view-${v}`).classList.toggle('hidden', v !== view);
   document.querySelectorAll('.tabs button').forEach((b) => b.classList.toggle('active', b.dataset.view === view));
@@ -117,6 +117,7 @@ async function route({ quiet = false } = {}) {
       if (m) await loadCustomer(m[1], { quiet }); else clearCustomer();
     } else if (h === 'orders') { show('orders'); await loadOrders(); }
     else if (h === 'totals') { show('totals'); await loadTotals(); }
+    else if (h === 'slots') { show('slots'); await loadSlots(); }
     else if (h.startsWith('new')) { show('new'); if (!quiet) startNewOrder(new URLSearchParams(h.split('?')[1]).get('customer')); }
     else if (h === 'import') { show('import'); }
     else { location.hash = ''; }
@@ -463,6 +464,45 @@ $('#print-list').addEventListener('click', () => {
   window.print();
 });
 
+// ================= Pickup slots =================
+$('#sl-date').value = todayISO();
+const shiftDay = (iso, n) => new Date(Date.parse(iso + 'T12:00:00') + n * 864e5).toISOString().slice(0, 10);
+
+async function loadSlots() {
+  const date = $('#sl-date').value || todayISO();
+  const d = await api(`/api/admin/slots?date=${date}`);
+  const t = todayISO();
+  const rel = date === t ? 'Today · ' : date === shiftDay(t, 1) ? 'Tomorrow · ' : '';
+  $('#sl-title').textContent = `${rel}${new Date(date + 'T00:00').toLocaleDateString([], { weekday: 'long', month: 'long', day: 'numeric' })}`;
+  const used = d.slots.filter((s) => s.count);
+  const busiest = used.reduce((m, s) => (s.count > (m?.count || 0) ? s : m), null);
+  $('#sl-stats').innerHTML = `
+    <div class="stat"><div class="v">${d.total}</div><div class="l">Orders this day</div></div>
+    <div class="stat"><div class="v">${d.slots.filter((s) => s.full).length}</div><div class="l">Full slots</div></div>
+    <div class="stat"><div class="v">${d.max || '∞'}</div><div class="l">Max per slot (online)</div></div>
+    ${busiest ? `<div class="stat"><div class="v">${clock(busiest.start)}</div><div class="l">Busiest slot (${busiest.count})</div></div>` : ''}`;
+  $('#sl-grid').innerHTML = d.slots.map((s) => {
+    const pct = s.max ? Math.min(100, Math.round((s.count / s.max) * 100)) : 0;
+    const level = s.full ? 'full' : pct >= 70 ? 'busy' : s.count ? 'some' : 'empty';
+    return `<div class="slot-card ${level}">
+      <div class="slot-head"><b>${clock(s.start)} – ${clock(s.end)}</b>
+        <span class="slot-count">${s.count}${s.max ? ` / ${s.max}` : ''}${s.full ? ' · FULL' : ''}</span></div>
+      ${s.max ? `<div class="slot-bar"><span style="width:${pct}%"></span></div>` : ''}
+      ${s.orders.length ? `<ul class="slot-orders">${s.orders.map((o) => `<li><a href="#customer/${o.customer_id}">${num(o)} ${esc(o.customer_name)}</a>
+        <span class="muted">${o.item_count} item${o.item_count === 1 ? '' : 's'}</span> ${badge(o.status)}${paid(o)}</li>`).join('')}</ul>`
+        : '<p class="muted slot-free">No orders</p>'}
+    </div>`;
+  }).join('');
+  $('#sl-notime').innerHTML = d.no_time.length ? `<section class="group"><header class="group-head"><div class="g-title">No pickup time set</div>
+    <div class="g-sub">${d.no_time.length} order${d.no_time.length === 1 ? '' : 's'}</div></header>
+    <ul class="slot-orders" style="padding:10px 14px">${d.no_time.map((o) => `<li>${num(o)} ${esc(o.customer_name)} ${badge(o.status)}</li>`).join('')}</ul></section>` : '';
+}
+for (const [id, fn] of [['#sl-prev', () => shiftDay($('#sl-date').value || todayISO(), -1)], ['#sl-next', () => shiftDay($('#sl-date').value || todayISO(), 1)],
+  ['#sl-today', () => todayISO()], ['#sl-tomorrow', () => shiftDay(todayISO(), 1)]]) {
+  $(id).addEventListener('click', () => { $('#sl-date').value = fn(); loadSlots().catch(() => {}); });
+}
+$('#sl-date').addEventListener('change', () => loadSlots().catch(() => {}));
+
 // ================= Item totals (prep list & sales) =================
 const tPrefs = (() => { try { return JSON.parse(localStorage.getItem('totals-view') || '{}'); } catch { return {}; } })();
 const saveT = () => { try { localStorage.setItem('totals-view', JSON.stringify(tPrefs)); } catch { /* ignore */ } };
@@ -625,6 +665,8 @@ $('#n-status').innerHTML = Object.entries(STATUSES).map(([k, v]) => `<option val
 
 async function startNewOrder(customerId) {
   $('#new-form').reset();
+  fillSlotSelects();
+  nSlots = {};
   showError($('#new-error'), '');
   $('#n-match').classList.add('hidden');
   $('#n-date').value = todayISO();
@@ -658,6 +700,22 @@ $('#n-name').addEventListener('change', () => {
   }
   showMatch(c);
 });
+// Show how full each slot is for the chosen pickup day (staff can still book a full slot).
+let nSlots = {};
+async function refreshNewOrderSlots() {
+  const date = $('#n-pickup').value;
+  nSlots = {};
+  const chosen = $('#n-time').value;
+  if (!date) { fillSlotSelects(); $('#n-time').value = chosen; return; }
+  const d = await api(`/api/admin/slots?date=${date}`).catch(() => null);
+  if (!d) return;
+  for (const s of d.slots) nSlots[s.start] = s;
+  $('#n-time').innerHTML = '<option value="">Any time</option>' + d.slots.map((s) =>
+    `<option value="${s.start}">${slotLabel(s.start)} — ${s.count}${s.max ? `/${s.max}` : ''} orders${s.full ? ' · FULL' : ''}</option>`).join('');
+  $('#n-time').value = chosen;
+}
+$('#n-pickup').addEventListener('change', () => refreshNewOrderSlots());
+
 $('#n-fulfillment').addEventListener('change', (e) => $('#n-address-field').classList.toggle('hidden', e.target.value !== 'delivery'));
 
 function addItemRow() {
@@ -718,6 +776,8 @@ $('#new-form').addEventListener('submit', async (e) => {
   showError($('#new-error'), '');
   const items = newOrderItems().filter((it) => it.name).map(({ tr, ...it }) => it);
   if (!items.length) return showError($('#new-error'), 'Add at least one item.');
+  const slot = nSlots[$('#n-time').value];
+  if (slot?.full && !confirm(`The ${slotLabel(slot.start)} slot already has ${slot.count} orders (max ${slot.max}). Add this order anyway?`)) return;
   const btn = e.submitter || $('#new-form button[type=submit]');
   btn.disabled = true;
   try {

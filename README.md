@@ -61,6 +61,14 @@ Customers, and staff entering phone orders, pick a **half-hour pickup slot**, su
 
 Orders with other times, from imports or Stripe, go into the slot they fall in (10:47 → 10:30–11:00).
 
+**🕐 Slots tab:** pick a day (◀ ▶, Today, Tomorrow) to see every slot with a fill bar ("8 / 10"), the orders in it by number and name, and full slots in red.
+
+**At most 10 orders per slot** for online orders:
+- **Customers:** full slots are greyed out on the order page, and nearly full ones say "only 2 left". The program also re-checks when the order is placed, so two customers can't both take the last place.
+- **Staff (New order):** each slot's count is shown, with a warning before adding to a full slot. Staff can still add it.
+- **Imported and Stripe orders:** always accepted, since the customer has already paid. They do count toward the slot.
+- **Changing the limit:** set `PICKUP_SLOT_MAX` in `.env` (0 = no limit), then restart.
+
 **Opening hours** default to 10:00 AM – 6:00 PM. Change them in `.env` with `PICKUP_OPEN=10:00` and `PICKUP_CLOSE=18:00` (24-hour clock), then restart the program. The same hours apply every day.
 
 ## Importing the Excel spreadsheet

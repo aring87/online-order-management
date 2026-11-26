@@ -47,7 +47,10 @@ const app = createApp(db, {
     demo: Boolean(demoSecret),
     ...(process.env.STRIPE_API_BASE ? { apiBase: process.env.STRIPE_API_BASE } : {}),  // for testing only
   },
-  pickup: { open: process.env.PICKUP_OPEN, close: process.env.PICKUP_CLOSE, slotMinutes: process.env.PICKUP_SLOT_MINUTES },
+  pickup: {
+    open: process.env.PICKUP_OPEN, close: process.env.PICKUP_CLOSE,
+    slotMinutes: process.env.PICKUP_SLOT_MINUTES, slotMax: process.env.PICKUP_SLOT_MAX,
+  },
 });
 app.locals.stripe.start();
 // Behind a hosting proxy (Render, Railway, Fly, nginx…) this makes HTTPS detection and IPs correct.

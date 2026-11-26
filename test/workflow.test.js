@@ -186,7 +186,7 @@ test('pickup slots: settings and item totals for one half-hour slot', async () =
   const base = `http://127.0.0.1:${server.address().port}`;
   const post = (body) => fetch(base + '/api/admin/orders', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
   try {
-    assert.deepEqual((await (await fetch(base + '/api/settings')).json()).pickup, { open: '09:00', close: '17:00', slot_minutes: 30 });
+    assert.deepEqual((await (await fetch(base + '/api/settings')).json()).pickup, { open: '09:00', close: '17:00', slot_minutes: 30, slot_max: 10 });
     await post({ name: 'A', pickup_date: '2026-12-01', pickup_time: '10:00', items: [{ name: 'Brisket', quantity: 5, unit: 'lb' }] });
     await post({ name: 'B', pickup_date: '2026-12-01', pickup_time: '10:20', items: [{ name: 'Brisket', quantity: 3, unit: 'lb' }] });
     await post({ name: 'C', pickup_date: '2026-12-01', pickup_time: '10:30', items: [{ name: 'Brisket', quantity: 7, unit: 'lb' }] });
@@ -198,3 +198,32 @@ test('pickup slots: settings and item totals for one half-hour slot', async () =
     assert.equal((await get('')).items[0].lb, 16);
   } finally { server.closeAllConnections(); server.close(); }
 });
+
+test('slots: counts per slot and 10-per-slot limit for online orders (staff can override)', () => withServer(async (req) => {
+  const date = '2026-12-05';
+  for (let i = 0; i < 10; i++) {
+    const r = await req('/api/orders', { method: 'POST', auth: false,
+      body: online({ email: `c${i}@example.com`, phone: `555-010-0${400 + i}`, pickup_date: date, pickup_time: i % 2 ? '10:15' : '10:00' }) });
+    assert.equal(r.status, 201, JSON.stringify(r.data));
+  }
+  const full = await req('/api/orders', { method: 'POST', auth: false, body: online({ email: 'late@example.com', phone: '555-010-0499', pickup_date: date, pickup_time: '10:00' }) });
+  assert.equal(full.status, 400, '11th online order in the 10:00 slot is refused');
+  assert.match(full.data.error, /filled up/);
+  assert.equal((await req('/api/orders', { method: 'POST', auth: false, body: online({ email: 'ok@example.com', phone: '555-010-0498', pickup_date: date, pickup_time: '10:30' }) })).status, 201);
+
+  const staff = await req('/api/admin/orders', { method: 'POST', body: { name: 'Regular', pickup_date: date, pickup_time: '10:00', items: [{ name: 'Bacon', quantity: 1 }] } });
+  assert.equal(staff.status, 201, 'staff can add to a full slot');
+  const x = await req('/api/admin/orders', { method: 'POST', body: { name: 'Gone', pickup_date: date, pickup_time: '11:00', items: [{ name: 'Bacon', quantity: 1 }] } });
+  await req(`/api/admin/orders/${x.data.id}`, { method: 'PATCH', body: { status: 'cancelled' } });
+
+  const pub = (await req(`/api/slots?date=${date}`, { auth: false })).data;
+  const s10 = pub.slots.find((s) => s.start === '10:00');
+  assert.deepEqual([s10.count, s10.max, s10.full], [11, 10, true]);
+  assert.equal(pub.slots.find((s) => s.start === '10:30').count, 1);
+  assert.equal(pub.slots.find((s) => s.start === '11:00').count, 0, 'cancelled orders free the slot');
+  assert.equal(s10.orders, undefined, 'customers see counts only');
+
+  const admin = (await req(`/api/admin/slots?date=${date}`)).data;
+  assert.equal(admin.slots.find((s) => s.start === '10:00').orders.length, 11);
+  assert.equal(admin.total, 12);
+}));

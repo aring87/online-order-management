@@ -85,7 +85,7 @@ $('#order-form').addEventListener('submit', async (e) => {
       body: JSON.stringify(payload),
     });
     const data = await res.json();
-    if (!res.ok) return showError(data.error || 'Could not place order.');
+    if (!res.ok) { refreshSlots(); return showError(data.error || 'Could not place order.'); }
     $('#done-number').textContent = data.id;
     $('#done-msg').textContent = `${data.items.length} item(s) · estimated ${money(data.total_cents)}. We'll contact you at ${payload.email} if we have any questions.`;
     saveDetails();
@@ -142,6 +142,25 @@ function slotOptions({ open = '10:00', close = '18:00', slot_minutes: step = 30 
 }
 fetch('/api/settings').then((r) => r.json()).then((s) => { $('#pickup_time').innerHTML += slotOptions(s.pickup); })
   .catch(() => { $('#pickup_time').innerHTML += slotOptions(); });
+
+// Once a date is picked, show how many places are left in each slot; full slots can't be chosen.
+async function refreshSlots() {
+  const date = $('#pickup_date').value;
+  if (!date) return;
+  let data;
+  try { data = await (await fetch(`/api/slots?date=${date}`)).json(); } catch { return; }
+  if (!data.slots) return;
+  const nice = (t) => new Date(2000, 0, 1, Number(t.slice(0, 2)), Number(t.slice(3, 5))).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+  const chosen = $('#pickup_time').value;
+  $('#pickup_time').innerHTML = '<option value="">Any time</option>' + data.slots.map((s) => {
+    const left = s.max ? s.max - s.count : null;
+    const note = s.full ? ' — FULL' : left !== null && left <= 3 ? ` — only ${left} left` : '';
+    return `<option value="${s.start}" ${s.full ? 'disabled' : ''}>${nice(s.start)} – ${nice(s.end)}${note}</option>`;
+  }).join('');
+  const still = [...$('#pickup_time').options].find((o) => o.value === chosen && !o.disabled);
+  $('#pickup_time').value = still ? chosen : '';
+}
+$('#pickup_date').addEventListener('change', refreshSlots);
 
 restoreDetails();
 loadProducts().catch(() => {

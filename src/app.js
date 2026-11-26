@@ -9,6 +9,7 @@ const { findOrCreateCustomer, insertOrder, getOrderWithItems, listOrdersWithItem
 const { readSpreadsheet, importRows, FIELDS, ImportError } = require('./importer');
 const { createStripe } = require('./stripe');
 const { itemTotals } = require('./reports');
+const { slotsFor, slotCount } = require('./slots');
 
 const STATUSES = ['new', 'preparing', 'ready', 'picked_up', 'cancelled'];
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -186,6 +187,9 @@ function createApp(db, {
     open: HHMM.test(pickup.open) ? pickup.open : '10:00',
     close: HHMM.test(pickup.close) ? pickup.close : '18:00',
     slot_minutes: [15, 20, 30, 60].includes(Number(pickup.slotMinutes)) ? Number(pickup.slotMinutes) : 30,
+    // Most orders per slot that customers can book online (0 = no limit). Staff can still add more.
+    slot_max: Number.isInteger(Number(pickup.slotMax)) && Number(pickup.slotMax) >= 0 && pickup.slotMax !== '' && pickup.slotMax != null
+      ? Number(pickup.slotMax) : 10,
   };
   const app = express();
   const smallJson = express.json({ limit: '100kb' });
@@ -214,6 +218,14 @@ function createApp(db, {
   // ---------- Public ----------
   app.get('/api/settings', (req, res) => res.json({ pickup: pickupHours }));
 
+  // How full each pickup slot is on a day. Customers see only counts; staff also get the orders.
+  app.get('/api/slots', (req, res) => {
+    const date = /^\d{4}-\d{2}-\d{2}$/.test(req.query.date) ? req.query.date : null;
+    if (!date) return res.status(400).json({ error: 'date=YYYY-MM-DD required' });
+    const r = slotsFor(db, date, pickupHours);
+    res.json({ ...r, no_time: r.no_time.length, slots: r.slots.map(({ orders, ...s }) => s) });
+  });
+
   app.get('/api/products', (req, res) => {
     res.json(db.prepare('SELECT id, name, category, unit, price_cents FROM products WHERE active = 1 ORDER BY category, name').all());
   });
@@ -221,6 +233,12 @@ function createApp(db, {
   app.post('/api/orders', (req, res) => {
     const o = validateOrder(req.body || {}, db);
     const order = transaction(db, () => {
+      // Online orders can't overbook a pickup slot (checked inside the transaction so two people
+      // can't both take the last place).
+      if (o.pickupDate && o.pickupTime && pickupHours.slot_max > 0
+          && slotCount(db, o.pickupDate, o.pickupTime, pickupHours.slot_minutes) >= pickupHours.slot_max) {
+        throw new ValidationError('Sorry, that pickup time just filled up. Please choose another time.');
+      }
       // Returning customers are matched by email / phone; their contact info is refreshed.
       const customer = findOrCreateCustomer(db, { name: o.name, email: o.email, phone: o.phone }, { refresh: true });
       const orderId = insertOrder(db, {
@@ -312,6 +330,13 @@ function createApp(db, {
   // Orders with their items, for the "Organize by customer / item / pickup day" views.
   // ?show=open|all|<status>  &from=YYYY-MM-DD&to=YYYY-MM-DD (pickup date)  &nodate=1 (only orders without a date)
   // &source=online|manual|import  &q=search
+  // Pickup slots with their orders, for the Slots screen.
+  app.get('/api/admin/slots', (req, res) => {
+    const date = /^\d{4}-\d{2}-\d{2}$/.test(req.query.date) ? req.query.date : null;
+    if (!date) return res.status(400).json({ error: 'date=YYYY-MM-DD required' });
+    res.json(slotsFor(db, date, pickupHours));
+  });
+
   // Totals per item and per cut, for the prep list (by pickup date) and sales (by order date).
   app.get('/api/admin/reports/items', (req, res) => {
     const isDate = (d) => (/^\d{4}-\d{2}-\d{2}$/.test(d) ? d : undefined);
