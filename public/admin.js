@@ -76,14 +76,14 @@ const showError = (el, msg) => { el.textContent = msg || ''; el.classList.toggle
 
 // ================= Login =================
 function showLogin() {
-  for (const id of ['#app', '#refresh', '#logout', '#export', '#alerts']) $(id).classList.add('hidden');
+  for (const id of ['#app', '#more-menu', '#new-order-btn', '#alerts']) $(id).classList.add('hidden');
   stopLive();
   $('#view-login').classList.remove('hidden');
   $('#password').focus();
 }
 function showApp() {
   $('#view-login').classList.add('hidden');
-  for (const id of ['#app', '#refresh', '#logout', '#export']) $(id).classList.remove('hidden');
+  for (const id of ['#app', '#more-menu', '#new-order-btn']) $(id).classList.remove('hidden');
   updateAlertsButton();
   startLive();
   refreshCounts();
@@ -106,7 +106,7 @@ $('#logout').addEventListener('click', async () => {
 });
 
 // ================= Views & routing =================
-const VIEWS = ['board', 'online', 'customers', 'orders', 'slots', 'totals', 'new', 'import'];
+const VIEWS = ['board', 'connections', 'customers', 'orders', 'slots', 'totals', 'new', 'import'];
 function show(view) {
   for (const v of VIEWS) $(`#view-${v}`).classList.toggle('hidden', v !== view);
   document.querySelectorAll('.tabs button').forEach((b) => b.classList.toggle('active', b.dataset.view === view));
@@ -124,7 +124,9 @@ async function route({ quiet = false } = {}) {
   const m = h.match(/^customer\/(\d+)$/);
   try {
     if (h === '') { show('board'); await loadBoard(); }
-    else if (h === 'online') { show('online'); await loadOnline(); }
+    else if (h === 'online') { location.hash = ''; }                       // online orders now live on the Prep board
+    else if (h === 'connections') { show('connections'); await loadConnections(); }
+    else if (h === 'totals-sales') { setMode('sales'); location.hash = 'totals'; }
     else if (m || h === 'customers') {
       show('customers');
       await loadCustomers();
@@ -611,7 +613,7 @@ const fmtQty = (lb, each) => [lb ? `${lb} lb` : '', each ? `${each}${lb ? ' each
 const dLong = (s) => new Date(s + 'T00:00').toLocaleDateString([], { weekday: 'long', month: 'long', day: 'numeric' });
 function totalsTitle() {
   const [from, to] = rangeDates($('#t-range').value);
-  const what = tPrefs.mode === 'prep' ? 'Prep list' : 'Sold';
+  const what = tPrefs.mode === 'prep' ? 'Prep list' : 'Sales';
   const when = !from && !to ? 'all time' : from === to ? (tPrefs.mode === 'prep' ? `pickup ${dLong(from)}` : dLong(from))
     : `${tPrefs.mode === 'prep' ? 'pickup ' : ''}${day(from)} – ${day(to)}`;
   const slot = tPrefs.mode === 'prep' && $('#t-slot').value ? ` · ${$('#t-slot').selectedOptions[0].text}` : '';
@@ -962,14 +964,14 @@ const NEXT = {
 };
 let boardOrders = [];
 
-function itemLine(it, { checkable = false } = {}) {
+function itemLine(it, { checkable = false, weigh = checkable } = {}) {
   const box = checkable
     ? `<input type="checkbox" data-item="${it.id}" ${it.packed ? 'checked' : ''} aria-label="Packed: ${esc(it.product_name)}">`
     : '';
   return `<li class="${it.packed ? 'packed' : ''}"><label>${box}
     <span class="q">${esc(qty(it))}</span>
     <span class="i">${esc(it.product_name)}${it.cut_instructions ? `<span class="cut">✂ ${esc(it.cut_instructions)}</span>` : ''}</span>
-  </label>${checkable && it.unit === 'lb' ? weighInput(it) : ''}</li>`;
+  </label>${weigh && it.unit === 'lb' ? weighInput(it) : ''}</li>`;
 }
 
 // ⚖ Actual weight box for a by-the-pound item, with the repriced line.
@@ -1018,7 +1020,7 @@ function ticketCard(o, { online = false } = {}) {
   const d = due(o);
   const packed = o.items.filter((i) => i.packed).length;
   const next = NEXT[o.status];
-  const unseen = online && !o.seen_at;
+  const unseen = o.source === 'online' && !o.seen_at;   // new online order: NEW ribbon + "Got it" 
   return `
   <article class="ticket st-${o.status} ${unseen ? 'unseen' : ''}" id="ticket-${o.id}">
     ${unseen ? '<div class="ribbon">NEW</div>' : ''}
@@ -1031,7 +1033,7 @@ function ticketCard(o, { online = false } = {}) {
       <div class="due ${d.cls}">${esc(d.text)} ${paid(o)}${orderRefTxt(o) ? ` <span class="order-ref">${orderRefTxt(o)}</span>` : ''}</div>
     </header>
     ${online ? `<div class="muted small-meta">Ordered ${new Date(o.created_at.replace(' ', 'T') + 'Z').toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' })} · ${badge(o.status)}</div>` : ''}
-    <ul class="checklist">${o.items.map((it) => itemLine(it, { checkable: !online })).join('')}</ul>
+    <ul class="checklist">${o.items.map((it) => itemLine(it, { checkable: !online, weigh: !online && (o.status !== 'new' || it.actual_quantity != null) })).join('')}</ul>
     ${o.notes ? `<p class="t-notes">📝 ${esc(o.notes)}</p>` : ''}
     ${o.delivery_address ? `<p class="t-notes">🚚 ${esc(o.delivery_address)}</p>` : ''}
     ${online ? '' : weighBar(o)}
@@ -1052,6 +1054,10 @@ async function loadBoard() {
   renderBoard();
 }
 function renderBoard() {
+  const fresh = boardOrders.filter((o) => o.source === 'online' && !o.seen_at).length;
+  $('#board-new').classList.toggle('hidden', !fresh);
+  $('#board-new').innerHTML = fresh ? `🛒 <b>${fresh} new online order${fresh === 1 ? '' : 's'}</b> — marked <span class="mini-ribbon">NEW</span> below.
+    <button type="button" class="small secondary" id="seen-all">✓ Got them all</button>` : '';
   const q = $('#board-search').value.trim().toLowerCase();
   const shown = boardOrders.filter((o) => !q || [String(o.id), String(o.slot_number)].includes(q.replace('#', ''))
     || o.customer_name.toLowerCase().includes(q));
@@ -1069,6 +1075,17 @@ function renderBoard() {
   }
 }
 $('#board-search').addEventListener('input', renderBoard);
+$('#new-order-btn').addEventListener('click', () => { location.hash = 'new'; });
+// Close the ⋯ More menu after picking something, or when clicking elsewhere.
+document.addEventListener('click', (e) => {
+  const menu = $('#more-menu');
+  if (menu.open && (!menu.contains(e.target) || e.target.closest('.menu a, .menu button'))) menu.open = false;
+});
+$('#board-new').addEventListener('click', async (e) => {
+  if (!e.target.closest('#seen-all')) return;
+  await api('/api/admin/online/seen-all', { method: 'POST' }).catch(() => {});
+  refreshCounts(); loadBoard().catch(() => {});
+});
 $('#board-full').addEventListener('click', () => {
   if (document.fullscreenElement) document.exitFullscreen(); else document.documentElement.requestFullscreen?.();
 });
@@ -1105,7 +1122,7 @@ document.addEventListener('click', async (e) => {
   const seen = e.target.closest('[data-seen]');
   if (seen) {
     await api(`/api/admin/orders/${seen.dataset.seen}/seen`, { method: 'POST' }).catch(() => {});
-    refreshCounts(); loadOnline().catch(() => {});
+    refreshCounts(); loadBoard().catch(() => {});
   }
   const pr = e.target.closest('[data-print]');
   if (pr) printTicket(pr.dataset.print);
@@ -1175,18 +1192,9 @@ document.addEventListener('click', async (e) => {
   setTimeout(() => loadEcwidStatus().catch(() => {}), 1200);
 });
 
-async function loadOnline() {
-  loadEcwidStatus().catch(() => {});
-  loadStripeStatus().catch(() => {});
-  const list = await api(`/api/admin/online?show=${$('#online-show').value}`);
-  $('#online-empty').classList.toggle('hidden', list.length > 0);
-  $('#online-list').innerHTML = list.map((o) => ticketCard(o, { online: true })).join('');
+async function loadConnections() {
+  await Promise.all([loadEcwidStatus(), loadStripeStatus()]);
 }
-$('#online-show').addEventListener('change', () => loadOnline().catch(() => {}));
-$('#online-seen-all').addEventListener('click', async () => {
-  await api('/api/admin/online/seen-all', { method: 'POST' }).catch(() => {});
-  refreshCounts(); loadOnline().catch(() => {});
-});
 const orderPage = `${location.origin}/`;
 $('#order-link').href = orderPage;
 $('#order-link').textContent = orderPage;
@@ -1358,13 +1366,13 @@ function announce(evt) {
   const no = evt.slot_number != null ? `#${evt.slot_number}${evt.pickup_date ? ` (${day(evt.pickup_date)})` : ''}` : `#${evt.id}`;
   const text = `New online order ${no} from ${evt.name} · ${money(evt.total_cents)}`;
   const t = $('#toast');
-  t.innerHTML = `<b>🛒 ${esc(text)}</b><a href="#online">View</a>`;
+  t.innerHTML = `<b>🛒 ${esc(text)}</b><a href="#">View</a>`;
   t.classList.remove('hidden');
   clearTimeout(toastTimer);
   toastTimer = setTimeout(() => t.classList.add('hidden'), 15000);
   if (alertsOn() && window.Notification && Notification.permission === 'granted' && document.hidden) {
     const n = new Notification('New online order', { body: text, icon: '/icons/admin-icon-192.png', tag: `order-${evt.id}` });
-    n.onclick = () => { window.focus(); location.hash = 'online'; n.close(); };
+    n.onclick = () => { window.focus(); location.hash = ''; n.close(); };
   }
 }
 $('#toast').addEventListener('click', () => $('#toast').classList.add('hidden'));

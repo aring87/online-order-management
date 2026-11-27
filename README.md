@@ -5,11 +5,13 @@ A database for every customer order and item, replacing a hand-kept Excel sheet.
 
 Every order has an **order number** (#47). It's shown big on screen, on the printed ticket and on the customer's confirmation, so staff can say "do number 47" instead of reading the whole order out.
 
+**The screen is laid out around four jobs.** The tabs are **Prep board**, **🕐 Pickup slots**, **🔪 Prep list** and **Customers**. The **＋ New order** button is in the header. Everything used less often is under **⋯ More**: all orders and search, the sales report, import from and export to Excel, store and payment connections, and refresh.
+
 - **Prep board** (home screen): every open order as a numbered ticket in **New → Preparing → Ready** columns, soonest pickup first. Overdue and due-today orders are highlighted.
   - Helpers tick each item as it's cut and packed. Ticking the first item moves the order to Preparing.
   - **🖨 Print** gives a ticket with a big number and a checklist to go with the meat or onto the bag.
   - **⛶ Full screen** suits a screen or tablet in the back.
-- **Online orders:** website orders appear **instantly**, with no refresh needed. You get a pop-up, an unread count on the tab and in the browser tab title, and (after clicking **🔔 Turn on order alerts**) a chime and a desktop notification. Click **Got it** once an order has been seen. Online orders also go straight onto the prep board.
+- **New online orders** (website store, Stripe, or the program's own order page) appear **on the Prep board straight away**, marked **NEW**. You also get a pop-up, a count on the Prep board tab, and (after **🔔 Turn on alerts**) a chime and desktop notification. Click **Got it** on each, or **Got them all**.
 - **Customers:** the customer list is on the left. Click a name to see their full order history. The search box finds customers by name, phone, email **or item** (type "brisket" to see everyone who has ordered brisket).
 - **Orders:** every order, organized the way he chooses with the **Organize by** switch. The program remembers his choice.
   - **👤 Customer:** each customer with all of their orders and items underneath.
@@ -18,9 +20,9 @@ Every order has an **order number** (#47). It's shown big on screen, on the prin
   - **# Order:** a plain list by order number.
   - **Filters:** open orders or all orders (or one status), a pickup date (overdue, today, tomorrow, next 7 days), and where the order came from (online, in-store, imported).
   - **🖨 Print this list** prints exactly what's on screen. Organized by Item, it makes a cut list for the back.
-- **📊 Item totals:** how much of each item, and each cut of it, is needed or was sold. It's grouped by meat (Beef, Pork, Poultry, Lamb), and the program remembers the settings.
+- **🔪 Prep list:** how much of each item, and each cut of it, is needed or was sold. It's grouped by meat (Beef, Pork, Poultry, Lamb), and the program remembers the settings.
   - **🔪 Prep list (by pickup day):** everything due for pickup on a day (tomorrow by default), totalled so it can be cut and prepped the day before. For example: *Ribeye Steak 26 lb — 1.25" thick 4 lb (2 orders), 1" thick 5 lb (1 order), no special cut 12.5 lb*. **🖨 Print** gives a checklist. Items that haven't been ticked off as packed on the prep board are noted.
-  - **💵 Sold (by order date):** totals for today, yesterday, the last 7 or 30 days, this month, last month, this year, all time or chosen dates, with pounds, pieces, number of orders and dollars per item.
+  - **💵 Sales (by order date):** totals for today, yesterday, the last 7 or 30 days, this month, last month, this year, all time or chosen dates, with pounds, pieces, number of orders and dollars per item.
   - **Filters:** online orders only (the default), in-store and phone only, or all orders. Every order except cancelled, only orders not yet picked up, or only picked-up orders.
   - **⬇ Excel** downloads the totals as a spreadsheet.
   - **Matching:** the same item spelled differently ("Ribeye Steak", "ribeye steak", "Ribeye Steak (per lb)") is counted together.

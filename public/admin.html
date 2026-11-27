@@ -15,10 +15,20 @@
     <div class="wrap wide">
       <h1>Butcher Shop · Orders</h1>
       <div class="header-actions">
-        <button id="alerts" class="install hidden" type="button" title="Play a sound and show a notification when an online order arrives">🔔 Turn on order alerts</button>
-        <a id="export" class="btn install hidden" href="/api/admin/export.csv" download>⬇ Export to Excel</a>
-        <button id="refresh" class="install hidden" type="button">↻ Refresh</button>
-        <button id="logout" class="install hidden" type="button">Log out</button>
+        <button id="alerts" class="install hidden" type="button" title="Play a sound and show a notification when an online order arrives">🔔 Turn on alerts</button>
+        <button id="new-order-btn" class="install primary-h hidden" type="button">＋ New order</button>
+        <details class="more-menu hidden" id="more-menu">
+          <summary class="install">⋯ More</summary>
+          <div class="menu" role="menu">
+            <a href="#orders" role="menuitem">🔎 All orders &amp; search</a>
+            <a href="#totals-sales" role="menuitem">💵 Sales report</a>
+            <a href="#import" role="menuitem">⬆ Import from Excel</a>
+            <a id="export" href="/api/admin/export.csv" download role="menuitem">⬇ Export to Excel</a>
+            <a href="#connections" role="menuitem">🛍 Store &amp; payment connections</a>
+            <button id="refresh" type="button" role="menuitem">↻ Refresh</button>
+            <button id="logout" type="button" role="menuitem">Log out</button>
+          </div>
+        </details>
       </div>
     </div>
   </header>
@@ -39,18 +49,15 @@
 
     <div id="app" class="hidden">
       <nav class="tabs">
-        <button data-view="board" class="active">Prep board <span class="count" id="count-open"></span></button>
-        <button data-view="online">Online orders <span class="count alert" id="count-online"></span></button>
+        <button data-view="board" class="active">Prep board <span class="count alert" id="count-online" title="New online orders"></span><span class="count" id="count-open" title="Open orders"></span></button>
+        <button data-view="slots">🕐 Pickup slots</button>
+        <button data-view="totals">🔪 Prep list</button>
         <button data-view="customers">Customers</button>
-        <button data-view="orders">Orders</button>
-        <button data-view="slots">🕐 Slots</button>
-        <button data-view="totals">📊 Item totals</button>
-        <button data-view="new">＋ New order</button>
-        <button data-view="import">Import from Excel</button>
       </nav>
 
       <!-- Prep board: open orders as numbered tickets, in New / Preparing / Ready columns -->
       <section id="view-board" class="hidden">
+        <div id="board-new" class="board-new hidden"></div>
         <div class="board-bar">
           <p class="muted">Open orders, soonest pickup first. Tick items as they're cut &amp; packed, then move the order along.</p>
           <div class="filters">
@@ -66,26 +73,14 @@
       </section>
 
       <!-- Online orders from the website -->
-      <section id="view-online" class="hidden">
-        <div class="card online-head">
-          <div class="section-head">
-            <h2>Online orders</h2>
-            <div class="filters">
-              <select id="online-show" aria-label="Which online orders">
-                <option value="open">Unread &amp; open</option>
-                <option value="all">All online orders</option>
-              </select>
-              <button type="button" class="secondary" id="online-seen-all">✓ Mark all as seen</button>
-            </div>
-          </div>
-          <div id="ecwid-status" class="stripe-status"></div>
-          <div id="stripe-status" class="stripe-status"></div>
-          <p class="muted" style="margin:0">Orders placed on the website appear here instantly. Your order page:
-            <a id="order-link" target="_blank" rel="noopener"></a>
-            <button type="button" class="link" id="copy-link">Copy link</button></p>
-        </div>
-        <div id="online-list" class="online-list"></div>
-        <div id="online-empty" class="card empty hidden"><p class="muted">No new online orders. New ones will pop up here (keep this page open).</p></div>
+      <!-- Store & payment connections (under More) -->
+      <section id="view-connections" class="card hidden">
+        <h2>Store &amp; payment connections</h2>
+        <p class="muted">Where online orders come from. New ones appear on the Prep board with a NEW ribbon.</p>
+        <div id="ecwid-status" class="stripe-status"></div>
+        <div id="stripe-status" class="stripe-status"></div>
+        <p class="muted" style="margin:0">This program's own order page: <a id="order-link" target="_blank" rel="noopener"></a>
+          <button type="button" class="link" id="copy-link">Copy link</button></p>
       </section>
 
       <!-- Customers: list on the left, selected customer's orders on the right -->
@@ -178,10 +173,10 @@
       <!-- Item totals: prep list (by pickup day) and sales (by order date) -->
       <section id="view-totals" class="card hidden">
         <div class="section-head">
-          <h2>Item totals</h2>
+          <h2>Prep list</h2>
           <div class="seg" id="t-mode" role="radiogroup" aria-label="Report">
             <button type="button" role="radio" data-mode="prep">🔪 Prep list (by pickup day)</button>
-            <button type="button" role="radio" data-mode="sales">💵 Sold (by order date)</button>
+            <button type="button" role="radio" data-mode="sales">💵 Sales (by order date)</button>
           </div>
         </div>
         <div class="toolbar">

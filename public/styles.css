@@ -549,3 +549,18 @@ tr.slot-row td { background: #f1ebe5; font-weight: 700; font-size: .88rem; paddi
 .wb-hist { list-style: none; margin: 6px 0 0; padding: 0; font-size: .82rem; color: var(--muted); }
 @media print { .pt-actual { white-space: nowrap; font-size: 13pt; } }
 @media print { #print-area .pt p { white-space: pre-line; } }
+
+/* ---------- Simplified header: New order + More menu ---------- */
+button.install.primary-h { background: #fff; color: #3b2a24; border-color: #fff; font-weight: 700; }
+button.install.primary-h:hover { background: #f4efe9; }
+.more-menu { position: relative; }
+.more-menu > summary { list-style: none; cursor: pointer; display: inline-block; padding: 7px 12px; border-radius: 7px; font-weight: 600; font-size: .9rem; color: #fff; }
+.more-menu > summary::-webkit-details-marker { display: none; }
+.more-menu .menu { position: absolute; right: 0; top: calc(100% + 6px); z-index: 40; min-width: 250px; background: #fff; border: 1px solid var(--border); border-radius: 10px; box-shadow: 0 10px 30px rgba(0,0,0,.18); padding: 6px; display: flex; flex-direction: column; }
+.more-menu .menu a, .more-menu .menu button { display: block; text-align: left; padding: 9px 12px; border-radius: 7px; color: var(--text); text-decoration: none; background: none; border: 0; font: inherit; font-weight: 500; cursor: pointer; }
+.more-menu .menu a:hover, .more-menu .menu button:hover { background: var(--bg); }
+.more-menu .menu .hidden { display: none !important; }
+.board-new { background: #fff4d6; border: 1px solid #f1d58a; color: #5c4300; border-radius: 10px; padding: 10px 14px; margin-bottom: 12px; display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+.board-new.hidden { display: none; }
+.mini-ribbon { background: #e8a317; color: #2b2420; font-weight: 800; font-size: .7rem; padding: 1px 6px; border-radius: 4px; letter-spacing: .06em; }
+.tabs .count + .count { margin-left: 4px; }
